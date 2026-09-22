@@ -56,7 +56,17 @@ Go to **Settings** (owner or admin only).
 
 **Shopify**
 1. Shopify admin → Settings → Apps and sales channels → Develop apps → Create an app.
-2. Configure Admin API scopes: `read_orders`, `read_products`, `read_inventory`. Add `read_all_orders` if you want more than 60 days of history.
+2. Configure these Admin API access scopes:
+
+   | Scope | Used for |
+   |---|---|
+   | `read_orders` | Orders, refunds, line items, Shopify Payments fees |
+   | `read_all_orders` | Orders older than 60 days (needed for the first 90-day import) |
+   | `read_products` | Product and variant names, SKUs, prices, images |
+   | `read_inventory` | Shopify's "Cost per item" on each variant (used only when you have not entered supplier costs) |
+   | `read_customers` | Customer ID and email on orders, for new vs returning customers |
+
+   Read-only scopes are enough; the app never writes to your store.
 3. Install the app and paste the Admin API access token plus your `*.myshopify.com` domain.
 4. Run **Sync now**. Your products appear on the **Product costs** page, where you enter supplier costs per bundle size. Shopify's "Cost per item" is used only for products with no tiers.
 

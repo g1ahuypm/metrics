@@ -44,7 +44,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           ]}
           help={[
             "Shopify admin → Settings → Apps and sales channels → Develop apps → Create an app.",
-            "Configure Admin API scopes: read_orders, read_products, read_inventory (and read_all_orders for history beyond 60 days).",
+            "Configure Admin API access scopes: read_orders, read_all_orders (history beyond 60 days), read_products, read_inventory (cost per item), read_customers (new vs returning). Read-only is enough.",
             "Install the app and copy the Admin API access token. Set 'Cost per item' on products so COGS syncs automatically.",
           ]}
         />
