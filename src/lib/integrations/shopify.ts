@@ -26,7 +26,7 @@ type ShopifyOrder = {
   currentTotalDiscountsSet: Money;
   totalShippingPriceSet: Money;
   totalRefundedSet: Money;
-  customer: { id: string; email: string | null } | null;
+  customer: { id: string; defaultEmailAddress: { emailAddress: string | null } | null } | null;
   lineItems: {
     nodes: {
       id: string;
@@ -49,7 +49,7 @@ type ShopifyVariant = {
   title: string;
   sku: string | null;
   price: string;
-  image: { url: string } | null;
+  media: { nodes: { preview: { image: { url: string } | null } | null }[] };
   product: { id: string; title: string; featuredMedia: { preview: { image: { url: string } | null } | null } | null };
   inventoryItem: { unitCost: { amount: string } | null } | null;
 };
@@ -97,7 +97,7 @@ query Variants($cursor: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id title sku price
-      image { url }
+      media(first: 1) { nodes { preview { image { url } } } }
       product { id title featuredMedia { preview { image { url } } } }
       inventoryItem { unitCost { amount } }
     }
@@ -117,7 +117,7 @@ query Orders($cursor: String, $query: String) {
       currentTotalDiscountsSet { shopMoney { amount } }
       totalShippingPriceSet { shopMoney { amount } }
       totalRefundedSet { shopMoney { amount } }
-      customer { id email }
+      customer { id defaultEmailAddress { emailAddress } }
       lineItems(first: 100) {
         nodes {
           id title sku quantity
@@ -151,7 +151,7 @@ export async function syncShopifyVariants(cfg: IntegrationConfig): Promise<numbe
           price: Number(v.price),
           unitCost,
           costSource: "shopify",
-          imageUrl: v.image?.url ?? v.product.featuredMedia?.preview?.image?.url ?? null,
+          imageUrl: v.media.nodes[0]?.preview?.image?.url ?? v.product.featuredMedia?.preview?.image?.url ?? null,
         },
         update: {
           productId: v.product.id,
@@ -159,7 +159,7 @@ export async function syncShopifyVariants(cfg: IntegrationConfig): Promise<numbe
           variantTitle: v.title,
           sku: v.sku,
           price: Number(v.price),
-          imageUrl: v.image?.url ?? v.product.featuredMedia?.preview?.image?.url ?? null,
+          imageUrl: v.media.nodes[0]?.preview?.image?.url ?? v.product.featuredMedia?.preview?.image?.url ?? null,
           unitCost,
         },
       });
@@ -247,7 +247,7 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
         transactionFees,
         platformFees,
         customerId: o.customer?.id ?? null,
-        customerEmail: o.customer?.email ?? null,
+        customerEmail: o.customer?.defaultEmailAddress?.emailAddress ?? null,
         itemCount,
         source: o.sourceName,
         tags: o.tags.join(", "),

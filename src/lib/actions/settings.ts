@@ -69,6 +69,15 @@ export async function connectShopifyAction(_prev: FormState, formData: FormData)
   const token = String(formData.get("token") ?? "").trim();
   if (!domain.endsWith(".myshopify.com")) return { error: "Store domain should look like my-store.myshopify.com" };
   if (!token) return { error: "Enter the Admin API access token" };
+  if (/^shpss_/i.test(token)) {
+    return {
+      error:
+        "That is the app's API secret key, which cannot read store data. In your custom app open the API credentials tab and copy the Admin API access token, which starts with shpat_.",
+    };
+  }
+  if (!/^shpat_/i.test(token)) {
+    return { error: "The Admin API access token starts with shpat_. Check the API credentials tab of your custom app." };
+  }
   try {
     const shop = await testShopify({ domain, token });
     await db.settings.upsert({
