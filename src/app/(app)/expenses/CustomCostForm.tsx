@@ -7,9 +7,8 @@ import { COST_CATEGORIES, COST_TYPE_LABELS, COST_TYPES } from "@/lib/constants";
 import { FormMessage } from "@/components/FormMessage";
 import { SubmitButton } from "@/components/SubmitButton";
 
-export function CustomCostForm() {
+export function CustomCostForm({ today }: { today: string }) {
   const [state, action] = useActionState(addCustomCostAction, undefined);
-  const today = new Date().toISOString().slice(0, 10);
   return (
     <form action={action} className="rounded-lg border border-border bg-surface-2 p-3">
       <FormMessage state={state} />
@@ -27,7 +26,7 @@ export function CustomCostForm() {
           </select>
         </div>
         <div>
-          <label className="label">Type</label>
+          <label className="label">How it&apos;s charged</label>
           <select name="type" className="input" defaultValue="MONTHLY">
             {COST_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -53,7 +52,7 @@ export function CustomCostForm() {
           <input name="notes" className="input" />
         </div>
         <div className="flex items-end">
-          <SubmitButton className="btn-primary w-full" pendingText="Adding…">Add cost</SubmitButton>
+          <SubmitButton className="btn-primary w-full" pendingText="Adding…">Add expense</SubmitButton>
         </div>
       </div>
     </form>
@@ -68,9 +67,9 @@ export function DeleteCostButton({ id }: { id: string }) {
       className="btn-danger py-1"
       disabled={pending}
       onClick={() => {
-        if (confirm("Delete this cost?")) start(() => deleteCustomCostAction(id));
+        if (confirm("Delete this expense?")) start(() => deleteCustomCostAction(id));
       }}
-      aria-label="Delete cost"
+      aria-label="Delete expense"
     >
       <Trash2 className="h-4 w-4" />
     </button>

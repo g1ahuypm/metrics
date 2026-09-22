@@ -1,6 +1,8 @@
 import "server-only";
 import { subDays } from "date-fns";
 import { db } from "../db";
+import { costOrder } from "../costing";
+import { loadCostBook } from "../costbook";
 import type { IntegrationConfig } from "./config";
 
 const API_VERSION = "2025-07";
@@ -138,8 +140,6 @@ export async function syncShopifyVariants(cfg: IntegrationConfig): Promise<numbe
     } = await shopifyGraphQL(cfg.shopify, VARIANTS_QUERY, { cursor });
     for (const v of data.productVariants.nodes) {
       const unitCost = v.inventoryItem?.unitCost ? Number(v.inventoryItem.unitCost.amount) : null;
-      const existing = await db.productVariant.findUnique({ where: { shopifyId: v.id } });
-      const keepManual = existing?.costSource === "manual";
       await db.productVariant.upsert({
         where: { shopifyId: v.id },
         create: {
@@ -160,7 +160,7 @@ export async function syncShopifyVariants(cfg: IntegrationConfig): Promise<numbe
           sku: v.sku,
           price: Number(v.price),
           imageUrl: v.image?.url ?? v.product.featuredMedia?.preview?.image?.url ?? null,
-          ...(keepManual ? {} : { unitCost }),
+          unitCost,
         },
       });
       count++;
@@ -173,17 +173,8 @@ export async function syncShopifyVariants(cfg: IntegrationConfig): Promise<numbe
 export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Promise<number> {
   if (!cfg.shopify) throw new Error("Shopify is not connected");
 
-  // Manual COGS overrides take precedence over Shopify's unit cost.
-  const overrides = new Map<string, number>();
-  const manual = await db.productVariant.findMany({
-    where: { costSource: "manual", unitCost: { not: null } },
-    select: { shopifyId: true, unitCost: true },
-  });
-  for (const m of manual) overrides.set(m.shopifyId, m.unitCost!);
-
-  const variantIds = new Map<string, string>();
-  const variants = await db.productVariant.findMany({ select: { id: true, shopifyId: true } });
-  for (const v of variants) variantIds.set(v.shopifyId, v.id);
+  // Supplier cost tiers (Product costs page) win over Shopify's cost per item.
+  const book = await loadCostBook(cfg.defaultCogsPercent);
 
   let cursor: string | null = null;
   let count = 0;
@@ -196,28 +187,35 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
 
     for (const o of data.orders.nodes) {
       const total = num(o.currentTotalPriceSet);
-      const lineItems = o.lineItems.nodes.map((li) => {
-        const price = num(li.discountedTotalSet);
-        const override = li.variant ? overrides.get(li.variant.id) : undefined;
-        const shopifyCost = li.variant?.inventoryItem?.unitCost
-          ? Number(li.variant.inventoryItem.unitCost.amount)
-          : null;
-        const unitCost =
-          override ??
-          shopifyCost ??
-          (cfg.defaultCogsPercent > 0 && li.quantity > 0 ? (price / li.quantity) * (cfg.defaultCogsPercent / 100) : 0);
-        return {
-          shopifyId: li.id,
-          variantId: li.variant ? (variantIds.get(li.variant.id) ?? null) : null,
-          title: li.title,
-          sku: li.sku,
+      // A variant seen on an order but not yet in the cost book (new product) falls back to
+      // the unit cost Shopify reports on the line itself.
+      for (const li of o.lineItems.nodes) {
+        if (li.variant && !book.shopifyUnitCost.has(li.variant.id) && li.variant.inventoryItem?.unitCost) {
+          book.shopifyUnitCost.set(li.variant.id, Number(li.variant.inventoryItem.unitCost.amount));
+        }
+      }
+      const costed = costOrder(
+        book,
+        o.lineItems.nodes.map((li) => ({
+          variantShopifyId: li.variant?.id ?? null,
           quantity: li.quantity,
-          price,
-          unitCost,
-        };
-      });
+          price: num(li.discountedTotalSet),
+        })),
+        cfg.defaultShippingCost,
+      );
+      const lineItems = o.lineItems.nodes.map((li, i) => ({
+        shopifyId: li.id,
+        variantId: li.variant ? (book.internalId.get(li.variant.id) ?? null) : null,
+        title: li.title,
+        sku: li.sku,
+        quantity: li.quantity,
+        price: num(li.discountedTotalSet),
+        unitCost: costed.lines[i].unitCost,
+        shippingCost: costed.lines[i].shippingCost,
+        costSource: costed.lines[i].source,
+      }));
 
-      const cogs = lineItems.reduce((s, li) => s + li.unitCost * li.quantity, 0);
+      const cogs = costed.cogs;
       const itemCount = lineItems.reduce((s, li) => s + li.quantity, 0);
 
       const feeFromShopify = o.transactions
@@ -244,7 +242,7 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
         total,
         refunded: num(o.totalRefundedSet),
         cogs,
-        shippingCost: cfg.defaultShippingCost,
+        shippingCost: costed.shippingCost,
         handlingCost: cfg.defaultHandlingCost,
         transactionFees,
         platformFees,

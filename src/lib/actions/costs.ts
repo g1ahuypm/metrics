@@ -5,9 +5,62 @@ import { z } from "zod";
 import { db } from "../db";
 import { requireEditor } from "../auth";
 import { parseISODate } from "../dates";
+import { COST_TYPES } from "../constants";
+import { recostAllOrders } from "../costbook";
 import type { FormState } from "./auth";
 
-import { COST_TYPES } from "../constants";
+// ---------------------------------------------------------------------------
+// Supplier cost tiers
+// ---------------------------------------------------------------------------
+
+const tierSchema = z
+  .array(
+    z.object({
+      quantity: z.number().int().min(1).max(1000),
+      productCost: z.number().min(0),
+      shippingCost: z.number().min(0),
+    }),
+  )
+  .max(50);
+
+export type TierInput = z.infer<typeof tierSchema>[number];
+
+/** Replaces the tiers for a product (variantId = "") or one variant. */
+export async function saveTiersAction(productId: string, variantId: string, tiers: TierInput[]): Promise<FormState> {
+  await requireEditor();
+  const parsed = tierSchema.safeParse(tiers);
+  if (!parsed.success) return { error: "Enter whole quantities and non-negative costs" };
+  const seen = new Set<number>();
+  for (const t of parsed.data) {
+    if (seen.has(t.quantity)) return { error: `Quantity ${t.quantity} is listed twice` };
+    seen.add(t.quantity);
+  }
+  await db.$transaction([
+    db.costTier.deleteMany({ where: { productId, variantId } }),
+    ...parsed.data.map((t) => db.costTier.create({ data: { productId, variantId, ...t } })),
+  ]);
+  revalidatePath("/", "layout");
+  return { success: parsed.data.length ? "Costs saved" : "Costs cleared" };
+}
+
+/** Removes a variant's own tiers so it falls back to the product-level tiers. */
+export async function clearVariantTiersAction(productId: string, variantId: string): Promise<void> {
+  await requireEditor();
+  await db.costTier.deleteMany({ where: { productId, variantId } });
+  revalidatePath("/", "layout");
+}
+
+/** Re-prices every stored order with the current tiers. */
+export async function recostOrdersAction(): Promise<{ orders: number }> {
+  await requireEditor();
+  const orders = await recostAllOrders();
+  revalidatePath("/", "layout");
+  return { orders };
+}
+
+// ---------------------------------------------------------------------------
+// Custom costs (expenses)
+// ---------------------------------------------------------------------------
 
 export async function addCustomCostAction(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireEditor();
@@ -36,46 +89,11 @@ export async function addCustomCostAction(_prev: FormState, formData: FormData):
   }
   await db.customCost.create({ data: parsed.data });
   revalidatePath("/", "layout");
-  return { success: "Cost added" };
+  return { success: "Expense added" };
 }
 
 export async function deleteCustomCostAction(id: string): Promise<void> {
   await requireEditor();
   await db.customCost.delete({ where: { id } });
   revalidatePath("/", "layout");
-}
-
-export async function updateVariantCostAction(variantId: string, unitCost: number | null): Promise<void> {
-  await requireEditor();
-  await db.productVariant.update({
-    where: { id: variantId },
-    data: unitCost === null ? { unitCost: null, costSource: "shopify" } : { unitCost, costSource: "manual" },
-  });
-  revalidatePath("/", "layout");
-}
-
-/**
- * Re-applies the current per-variant unit costs to historical order line items and
- * recalculates each order's COGS. Useful after entering costs by hand.
- */
-export async function recalculateCogsAction(): Promise<{ orders: number }> {
-  await requireEditor();
-  const variants = await db.productVariant.findMany({ select: { id: true, unitCost: true } });
-  const costs = new Map(variants.map((v) => [v.id, v.unitCost ?? 0]));
-  const orders = await db.order.findMany({ select: { id: true, lineItems: { select: { id: true, variantId: true, quantity: true, unitCost: true } } } });
-  let updated = 0;
-  for (const o of orders) {
-    let cogs = 0;
-    const updates = [];
-    for (const li of o.lineItems) {
-      const unitCost = li.variantId ? (costs.get(li.variantId) ?? li.unitCost) : li.unitCost;
-      cogs += unitCost * li.quantity;
-      if (unitCost !== li.unitCost) updates.push(db.orderLineItem.update({ where: { id: li.id }, data: { unitCost } }));
-    }
-    updates.push(db.order.update({ where: { id: o.id }, data: { cogs } }));
-    await db.$transaction(updates);
-    updated++;
-  }
-  revalidatePath("/", "layout");
-  return { orders: updated };
 }

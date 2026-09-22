@@ -5,7 +5,8 @@ A self-hosted profit dashboard for Shopify stores running Meta ads. It replaces 
 ## What it does
 
 - **Net profit, computed daily.** Revenue minus refunds, taxes, cost of goods, shipping, payment fees, Meta ad spend and your custom costs (apps, contractors, agencies).
-- **Shopify sales.** Orders, refunds, average order value, new vs returning customers, per-product revenue and gross margin. Cost of goods comes from Shopify's "Cost per item", with manual overrides.
+- **Supplier costs per bundle.** Enter what you pay for 1, 2, 3… units of each product (product cost plus shipping). Every order line is priced from those tiers automatically, so testing many products never mixes up their margins.
+- **Shopify sales.** Orders, refunds, average order value, new vs returning customers, per-product revenue and gross margin.
 - **Meta Ads.** Spend, ROAS, CPA, CTR, CPC, CPM and attributed purchases per campaign, compared with real Shopify orders. Blended metrics such as MER, POAS and cost per new customer.
 - **Team access.** Invite partners with a link. Owners and admins edit; partners get read-only access to every report.
 - **Any date range** with comparison against the previous period.
@@ -35,6 +36,20 @@ Open http://localhost:3000 and sign in with the seeded owner:
 
 Change these in `.env` (`SEED_OWNER_*`) before seeding, or set `SEED_DEMO_DATA=false` to seed only the owner account. If you skip seeding entirely, the first visit to the app asks you to create the owner account.
 
+## What you need
+
+Nothing beyond this repository and Node.js 22 to run it locally. To put it online you need a host and, optionally, a Postgres database:
+
+| Need | Free or cheap options |
+|---|---|
+| Hosting | [Vercel](https://vercel.com) (zero-config for Next.js, hourly cron included), [Railway](https://railway.app), [Render](https://render.com), or any VPS with Docker |
+| Database | SQLite (built in, fine for one store) or Postgres on [Neon](https://neon.tech) / [Supabase](https://supabase.com) for Vercel-style hosts that have no persistent disk |
+| Hourly sync trigger | Vercel Cron (already configured), the `sync` service in `docker-compose.yml`, or a free ping service such as cron-job.org |
+| Shopify | A custom app in your own store admin (no App Store listing needed) |
+| Meta | A system-user token from Business Settings |
+
+No TrueProfit, Triple Whale or similar subscription is needed. Voice or note-taking tools are unrelated to running this; the app has its own web interface.
+
 ## Connecting your accounts
 
 Go to **Settings** (owner or admin only).
@@ -43,7 +58,7 @@ Go to **Settings** (owner or admin only).
 1. Shopify admin → Settings → Apps and sales channels → Develop apps → Create an app.
 2. Configure Admin API scopes: `read_orders`, `read_products`, `read_inventory`. Add `read_all_orders` if you want more than 60 days of history.
 3. Install the app and paste the Admin API access token plus your `*.myshopify.com` domain.
-4. Set **Cost per item** on your product variants in Shopify so cost of goods syncs automatically. Anything missing can be filled in on the Costs page.
+4. Run **Sync now**. Your products appear on the **Product costs** page, where you enter supplier costs per bundle size. Shopify's "Cost per item" is used only for products with no tiers.
 
 **Meta Ads**
 1. Meta Business Settings → Users → System users → add a system user and assign it the ad account.
@@ -69,11 +84,13 @@ curl -H "Authorization: Bearer $CRON_SECRET" https://your-domain/api/cron/sync
 | Revenue | Order total charged to the customer, including shipping and tax |
 | Refunds | Shopify `totalRefunded`, attributed to the order date |
 | Taxes collected | Shopify order tax, treated as a pass-through cost |
-| Cost of goods | Line quantity × unit cost (Shopify cost per item, manual override, or fallback % of price) |
-| Shipping cost | The per-order shipping cost from Costs → assumptions (Shopify does not expose label costs via the API) |
+| Product cost | Supplier cost tiers from the Product costs page (exact match on quantity, otherwise the nearest smaller tier scaled per unit). Falls back to Shopify cost per item, then to the fallback % of price |
+| Shipping cost | Supplier shipping from the same tiers. Orders with no tier-priced product use the per-order shipping from Expenses → assumptions |
+| Handling cost | Per-order handling from Expenses → assumptions |
 | Payment fees | Shopify Payments fees when reported on the transaction, otherwise `% + fixed` from assumptions |
 | Meta ad spend | Campaign-level daily spend from the Marketing API |
-| Other costs | Custom costs: monthly (spread per day), daily, one-time, % of revenue, or per order |
+| Shopify platform fees | Optional % surcharge when you use a third-party gateway |
+| Expenses | Custom costs: monthly (spread per day), daily, one-time, % of revenue, or per order |
 
 **Gross profit** = revenue − refunds − taxes − COGS − shipping − fees.
 **Net profit** = gross profit − ad spend − other costs.
@@ -90,11 +107,23 @@ All daily bucketing uses UTC calendar days so Shopify orders and Meta daily insi
 | Admin | Edit costs, settings and integrations; invite partners |
 | Partner | View every report and cost; cannot change anything |
 
-## Production
+## Deploying
 
-1. Use Postgres: set `DATABASE_URL` and change `provider = "sqlite"` to `"postgresql"` in `prisma/schema.prisma`, then run `npx prisma migrate deploy` (or `npx prisma db push`).
-2. Set `APP_SECRET`, `CRON_SECRET` and `APP_URL` (used to build invite links behind a proxy).
-3. `npm run build && npm start`, or deploy to Vercel/Railway/Fly. The build output is `standalone`.
+**Docker (any VPS)**
+
+```bash
+cp .env.example .env   # set APP_SECRET, CRON_SECRET, APP_URL
+docker compose up -d --build
+```
+
+The database is a SQLite file on the `profitdeck-data` volume and the `sync` service triggers the hourly sync. Put a reverse proxy with HTTPS (Caddy, Nginx, Cloudflare Tunnel) in front of port 3000.
+
+**Vercel + Postgres**
+
+1. Create a Postgres database (Neon or Supabase) and copy its connection string.
+2. In `prisma/schema.prisma` change `provider = "sqlite"` to `provider = "postgresql"`, commit, and run `npx prisma db push` once against that database.
+3. Import the repository in Vercel and set `DATABASE_URL`, `APP_SECRET`, `CRON_SECRET` and `APP_URL`. Vercel Cron picks up `vercel.json` and calls the sync hourly.
+4. Open the deployed URL, create the owner account, connect Shopify and Meta, and sync.
 
 ## Scripts
 

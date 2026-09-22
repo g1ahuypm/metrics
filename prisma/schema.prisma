@@ -104,6 +104,22 @@ model ProductVariant {
   lineItems    OrderLineItem[]
 }
 
+// Supplier cost per bundle quantity. Product-level tiers (variantId = "")
+// apply to every variant of the product; variant-level tiers override them.
+// productCost and shippingCost are the TOTAL for `quantity` units, not per unit.
+model CostTier {
+  id           String   @id @default(cuid())
+  productId    String                     // ProductVariant.productId (Shopify product gid)
+  variantId    String   @default("")      // "" = applies to all variants of the product
+  quantity     Int
+  productCost  Float    @default(0)
+  shippingCost Float    @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([productId, variantId, quantity])
+  @@index([productId])
+}
+
 model Order {
   id              String    @id @default(cuid())
   shopifyId       String    @unique
@@ -153,7 +169,9 @@ model OrderLineItem {
   sku         String?
   quantity    Int             @default(1)
   price       Float           @default(0) // discounted line total
-  unitCost    Float           @default(0)
+  unitCost    Float           @default(0) // supplier product cost per unit (effective)
+  shippingCost Float          @default(0) // supplier shipping for this line (total)
+  costSource  String          @default("none") // "tier" | "shopify" | "fallback" | "none"
 
   @@index([orderId])
   @@index([variantId])

@@ -5,6 +5,7 @@ import { getCampaignBreakdown, getDataStatus, getMetrics } from "@/lib/metrics";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { KpiCard } from "@/components/KpiCard";
+import { StatStrip } from "@/components/StatStrip";
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart";
 import { EmptyState } from "@/components/EmptyState";
 
@@ -53,24 +54,29 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
         />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <KpiCard label="Ad spend" value={fmtMoney(t.adSpend, currency)} raw={t.adSpend} previous={p.adSpend} upIsGood={false} />
             <KpiCard label="Meta ROAS" value={fmtMultiple(t.roas)} raw={t.roas} previous={p.roas} />
-            <KpiCard label="MER (revenue ÷ spend)" value={fmtMultiple(t.mer)} raw={t.mer} previous={p.mer} />
             <KpiCard label="Meta CPA" value={fmtMoney(t.cpa, currency)} raw={t.cpa} previous={p.cpa} upIsGood={false} />
-            <KpiCard label="Cost per new customer" value={fmtMoney(t.ncpa, currency)} raw={t.ncpa} previous={p.ncpa} upIsGood={false} />
             <KpiCard label="Meta purchases" value={fmtNumber(t.adPurchases)} raw={t.adPurchases} previous={p.adPurchases} />
+            <KpiCard label="MER (revenue ÷ spend)" value={fmtMultiple(t.mer)} raw={t.mer} previous={p.mer} />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6">
-            <KpiCard label="Impressions" value={fmtNumber(t.impressions)} raw={t.impressions} previous={p.impressions} />
-            <KpiCard label="Link clicks" value={fmtNumber(t.clicks)} raw={t.clicks} previous={p.clicks} />
-            <KpiCard label="CTR" value={fmtPercent(t.ctr, 2)} raw={t.ctr} previous={p.ctr} />
-            <KpiCard label="CPC" value={fmtMoney(t.cpc, currency)} raw={t.cpc} previous={p.cpc} upIsGood={false} />
-            <KpiCard label="CPM" value={fmtMoney(t.cpm, currency)} raw={t.cpm} previous={p.cpm} upIsGood={false} />
-            <KpiCard label="Shopify orders" value={fmtNumber(t.orders)} raw={t.orders} previous={p.orders} />
+          <div className="mt-3">
+            <StatStrip
+              title="Delivery and funnel"
+              items={[
+                { label: "Impressions", value: fmtNumber(t.impressions), raw: t.impressions, previous: p.impressions },
+                { label: "Reach", value: fmtNumber(t.reach), raw: t.reach, previous: p.reach },
+                { label: "Link clicks", value: fmtNumber(t.clicks), raw: t.clicks, previous: p.clicks },
+                { label: "CTR", value: fmtPercent(t.ctr, 2), raw: t.ctr, previous: p.ctr },
+                { label: "CPC", value: fmtMoney(t.cpc, currency), raw: t.cpc, previous: p.cpc, upIsGood: false },
+                { label: "CPM", value: fmtMoney(t.cpm, currency), raw: t.cpm, previous: p.cpm, upIsGood: false },
+                { label: "Cost per new customer", value: fmtMoney(t.ncpa, currency), raw: t.ncpa, previous: p.ncpa, upIsGood: false },
+              ]}
+            />
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <div className="card p-4">
               <h2 className="mb-2 text-sm font-semibold">Ad spend vs Meta-attributed revenue</h2>
               <TimeSeriesChart
@@ -98,7 +104,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
             </div>
           </div>
 
-          <div className="mt-6 card overflow-hidden">
+          <div className="mt-4 card overflow-hidden">
             <div className="px-4 pt-4 pb-2">
               <h2 className="text-sm font-semibold">Campaigns</h2>
               <p className="text-xs text-ink-3">Sorted by spend. Metrics are Meta-reported for the selected period.</p>

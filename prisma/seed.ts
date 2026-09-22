@@ -8,6 +8,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { costOrder, type CostBook, type Tier } from "../src/lib/costing";
 
 const db = new PrismaClient();
 
@@ -27,13 +28,14 @@ const int = (a: number, b: number) => Math.floor(between(a, b + 1));
 const pick = <T,>(arr: T[]) => arr[Math.floor(rand() * arr.length)];
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+// Supplier costs per bundle: [quantity, product cost total, shipping total]
 const PRODUCTS = [
-  { product: "Everyday Hoodie", variants: ["Black / M", "Black / L", "Sand / M", "Sand / L"], price: 68, cost: 21, weight: 5 },
-  { product: "Trail Cap", variants: ["One size"], price: 32, cost: 7.5, weight: 4 },
-  { product: "Merino Crew Socks (3-pack)", variants: ["Mixed"], price: 42, cost: 13, weight: 4 },
-  { product: "Insulated Bottle 750ml", variants: ["Steel", "Forest"], price: 45, cost: 12.5, weight: 3 },
-  { product: "Weekender Bag", variants: ["Olive", "Charcoal"], price: 149, cost: 52, weight: 1.5 },
-  { product: "Wool Beanie", variants: ["Oat", "Navy"], price: 29, cost: 6.8, weight: 2.5 },
+  { product: "Everyday Hoodie", variants: ["Black / M", "Black / L", "Sand / M", "Sand / L"], price: 68, weight: 5, tiers: [[1, 16.4, 4.6], [2, 32.8, 6.2], [3, 49.2, 7.5]] },
+  { product: "Trail Cap", variants: ["One size"], price: 32, weight: 4, tiers: [[1, 4.9, 2.6], [2, 9.8, 3.4]] },
+  { product: "Merino Crew Socks (3-pack)", variants: ["Mixed"], price: 42, weight: 4, tiers: [[1, 9.8, 3.2], [2, 19.6, 4.1]] },
+  { product: "Insulated Bottle 750ml", variants: ["Steel", "Forest"], price: 45, weight: 3, tiers: [[1, 8.7, 3.8], [2, 17.4, 5.3]] },
+  { product: "Weekender Bag", variants: ["Olive", "Charcoal"], price: 149, weight: 1.5, tiers: [[1, 41.5, 10.5], [2, 83, 14]] },
+  { product: "Wool Beanie", variants: ["Oat", "Navy"], price: 29, weight: 2.5, tiers: [[1, 4.3, 2.5], [2, 8.6, 3.1], [3, 12.9, 3.6]] },
 ];
 
 const CAMPAIGNS = [
@@ -81,25 +83,24 @@ async function seedDemoData() {
     });
   }
 
-  // Variants
-  const variants: { id: string; title: string; sku: string; price: number; cost: number; weight: number }[] = [];
+  // Variants + supplier cost tiers
+  const book: CostBook = { tiers: new Map(), shopifyUnitCost: new Map(), productOf: new Map(), internalId: new Map(), fallbackCogsPercent: 0 };
+  const variants: { id: string; shopifyId: string; title: string; sku: string; price: number; weight: number }[] = [];
   for (const p of PRODUCTS) {
+    const productId = `gid://shopify/Product/${100 + PRODUCTS.indexOf(p)}`;
+    const tiers: Tier[] = p.tiers.map(([quantity, productCost, shippingCost]) => ({ quantity, productCost, shippingCost }));
+    for (const t of tiers) await db.costTier.create({ data: { productId, variantId: "", ...t } });
+    book.tiers.set(productId, new Map([["", tiers]]));
     for (const vt of p.variants) {
       const sku = `${p.product.split(" ").map((w) => w[0]).join("").toUpperCase()}-${vt.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6)}`;
       const shopifyId = `gid://shopify/ProductVariant/${1000 + variants.length}`;
       const v = await db.productVariant.create({
-        data: {
-          shopifyId,
-          productId: `gid://shopify/Product/${100 + PRODUCTS.indexOf(p)}`,
-          productTitle: p.product,
-          variantTitle: vt,
-          sku,
-          price: p.price,
-          unitCost: p.cost,
-          costSource: "shopify",
-        },
+        data: { shopifyId, productId, productTitle: p.product, variantTitle: vt, sku, price: p.price, unitCost: tiers[0].productCost, costSource: "shopify" },
       });
-      variants.push({ id: v.id, title: vt === "One size" || vt === "Mixed" ? p.product : `${p.product} - ${vt}`, sku, price: p.price, cost: p.cost, weight: p.weight });
+      book.shopifyUnitCost.set(shopifyId, tiers[0].productCost);
+      book.productOf.set(shopifyId, productId);
+      book.internalId.set(shopifyId, v.id);
+      variants.push({ id: v.id, shopifyId, title: vt === "One size" || vt === "Mixed" ? p.product : `${p.product} - ${vt}`, sku, price: p.price, weight: p.weight });
     }
   }
   const totalWeight = variants.reduce((s, v) => s + v.weight, 0);
@@ -177,20 +178,21 @@ async function seedDemoData() {
       if (!returning) customers.push(customerId);
 
       const lineCount = rand() < 0.65 ? 1 : rand() < 0.75 ? 2 : 3;
-      const lines: { variantId: string; title: string; sku: string; quantity: number; price: number; listPrice: number; unitCost: number }[] = [];
+      const lines: { variantId: string; shopifyId: string; title: string; sku: string; quantity: number; price: number; listPrice: number }[] = [];
       for (let l = 0; l < lineCount; l++) {
         const v = weightedVariant();
-        const qty = rand() < 0.85 ? 1 : 2;
+        const qty = rand() < 0.8 ? 1 : rand() < 0.8 ? 2 : 3;
         const discount = promo > 1 ? 0.8 : rand() < 0.15 ? 0.9 : 1;
-        lines.push({ variantId: v.id, title: v.title, sku: v.sku, quantity: qty, price: round2(v.price * qty * discount), listPrice: round2(v.price * qty), unitCost: v.cost });
+        lines.push({ variantId: v.id, shopifyId: v.shopifyId, title: v.title, sku: v.sku, quantity: qty, price: round2(v.price * qty * discount), listPrice: round2(v.price * qty) });
       }
+      const costed = costOrder(book, lines.map((l) => ({ variantShopifyId: l.shopifyId, quantity: l.quantity, price: l.price })), 6.5);
       const subtotal = round2(lines.reduce((s, l) => s + l.price, 0));
       const listTotal = lines.reduce((s, l) => s + l.quantity, 0);
       const shippingCharged = subtotal >= 75 ? 0 : 6.95;
       const tax = round2(subtotal * 0.07);
       const total = round2(subtotal + shippingCharged + tax);
       const refunded = rand() < 0.04 ? round2(pick(lines).price) : 0;
-      const cogs = round2(lines.reduce((s, l) => s + l.unitCost * l.quantity, 0));
+      const cogs = costed.cogs;
       const transactionFees = round2(total * 0.029 + 0.3);
       const cancelled = rand() < 0.01;
 
@@ -211,7 +213,7 @@ async function seedDemoData() {
           total,
           refunded,
           cogs,
-          shippingCost: round2(6.5 + (listTotal - 1) * 1.2),
+          shippingCost: costed.shippingCost,
           handlingCost: round2(1.25 + (listTotal - 1) * 0.35),
           transactionFees,
           platformFees: 0,
@@ -220,7 +222,14 @@ async function seedDemoData() {
           isNewCustomer: !returning,
           itemCount: listTotal,
           source: rand() < 0.9 ? "web" : "shopify_draft_order",
-          lineItems: { create: lines.map(({ listPrice: _listPrice, ...l }) => l) },
+          lineItems: {
+            create: lines.map(({ listPrice: _listPrice, shopifyId: _sid, ...l }, i) => ({
+              ...l,
+              unitCost: costed.lines[i].unitCost,
+              shippingCost: costed.lines[i].shippingCost,
+              costSource: costed.lines[i].source,
+            })),
+          },
         },
       });
     }

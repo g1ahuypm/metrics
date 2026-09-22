@@ -1,0 +1,25 @@
+services:
+  profitdeck:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
+      CRON_SECRET: ${CRON_SECRET:?set CRON_SECRET in .env}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+    volumes:
+      - profitdeck-data:/data
+    restart: unless-stopped
+
+  # Triggers the Shopify + Meta sync every hour.
+  sync:
+    image: curlimages/curl:latest
+    depends_on:
+      - profitdeck
+    environment:
+      CRON_SECRET: ${CRON_SECRET}
+    entrypoint: ["sh", "-c", "while true; do sleep 3600; curl -fsS -H \"Authorization: Bearer $$CRON_SECRET\" http://profitdeck:3000/api/cron/sync || true; done"]
+    restart: unless-stopped
+
+volumes:
+  profitdeck-data:

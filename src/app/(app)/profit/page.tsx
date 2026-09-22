@@ -7,6 +7,7 @@ import { getDataStatus, getMetrics } from "@/lib/metrics";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { KpiCard } from "@/components/KpiCard";
+import { StatStrip } from "@/components/StatStrip";
 import { ProfitBreakdown } from "@/components/ProfitBreakdown";
 import { BarSeriesChart } from "@/components/charts/BarSeriesChart";
 import { EmptyState } from "@/components/EmptyState";
@@ -38,31 +39,32 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
       </PageHeader>
 
       {!hasData ? (
-        <EmptyState
-          title="No data yet"
-          description="Connect Shopify and Meta Ads in Settings and run a sync to build your P&L."
-          actionHref="/settings"
-          actionLabel="Go to settings"
-        />
+        <EmptyState title="No data yet" description="Connect Shopify and Meta Ads in Settings and run a sync to build your P&L." actionHref="/settings" actionLabel="Go to settings" />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6">
-            <KpiCard hero label="Net profit" value={fmtMoney(t.netProfit, currency)} raw={t.netProfit} previous={p.netProfit} />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <KpiCard hero label="Net profit" value={fmtMoney(t.netProfit, currency)} raw={t.netProfit} previous={p.netProfit} sub={`${fmtPercent(t.margin)} net margin`} />
             <KpiCard label="Revenue" value={fmtMoney(t.revenue, currency)} raw={t.revenue} previous={p.revenue} />
-            <KpiCard label="Gross profit" value={fmtMoney(t.grossProfit, currency)} raw={t.grossProfit} previous={p.grossProfit} />
+            <KpiCard label="Gross profit" value={fmtMoney(t.grossProfit, currency)} raw={t.grossProfit} previous={p.grossProfit} sub={fmtPercent(t.grossMargin)} />
             <KpiCard label="Total costs" value={fmtMoney(t.totalCosts, currency)} raw={t.totalCosts} previous={p.totalCosts} upIsGood={false} />
-            <KpiCard label="Net margin" value={fmtPercent(t.margin)} raw={t.margin} previous={p.margin} />
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6">
-            <KpiCard label="Gross margin" value={fmtPercent(t.grossMargin)} raw={t.grossMargin} previous={p.grossMargin} />
-            <KpiCard label="COGS % of revenue" value={fmtPercent(t.cogsPercent)} raw={t.cogsPercent} previous={p.cogsPercent} upIsGood={false} />
-            <KpiCard label="Ad spend % of revenue" value={fmtPercent(t.adSpendPercent)} raw={t.adSpendPercent} previous={p.adSpendPercent} upIsGood={false} />
-            <KpiCard label="Discount rate" value={fmtPercent(t.discountRate)} raw={t.discountRate} previous={p.discountRate} upIsGood={false} />
-            <KpiCard label="Refund rate" value={fmtPercent(t.refundRate)} raw={t.refundRate} previous={p.refundRate} upIsGood={false} />
-            <KpiCard label="Break-even ROAS" value={fmtMultiple(t.breakEvenRoas)} raw={t.breakEvenRoas} previous={p.breakEvenRoas} upIsGood={false} />
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-5 lg:items-start">
+          <div className="mt-3">
+            <StatStrip
+              title="Ratios"
+              items={[
+                { label: "Product cost % of revenue", value: fmtPercent(t.cogsPercent), raw: t.cogsPercent, previous: p.cogsPercent, upIsGood: false },
+                { label: "Ad spend % of revenue", value: fmtPercent(t.adSpendPercent), raw: t.adSpendPercent, previous: p.adSpendPercent, upIsGood: false },
+                { label: "Discount rate", value: fmtPercent(t.discountRate), raw: t.discountRate, previous: p.discountRate, upIsGood: false },
+                { label: "Refund rate", value: fmtPercent(t.refundRate), raw: t.refundRate, previous: p.refundRate, upIsGood: false },
+                { label: "Break-even ROAS", value: fmtMultiple(t.breakEvenRoas), raw: t.breakEvenRoas, previous: p.breakEvenRoas, upIsGood: false },
+                { label: "Profit per order", value: fmtMoney(t.profitPerOrder, currency), raw: t.profitPerOrder, previous: p.profitPerOrder },
+                { label: "Units per order", value: fmtNumber(t.unitsPerOrder, 2), raw: t.unitsPerOrder, previous: p.unitsPerOrder },
+              ]}
+            />
+          </div>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-5 lg:items-start">
             <div className="card p-4 lg:col-span-2">
               <h2 className="mb-3 text-sm font-semibold">Statement</h2>
               <ProfitBreakdown totals={t} currency={currency} />
@@ -74,32 +76,22 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
                 data={costStack}
                 currency={currency}
                 stacked
-                height={300}
+                height={320}
                 series={[
-                  { key: "cogs", label: "Cost of goods", color: "var(--series-1)" },
+                  { key: "cogs", label: "Product cost", color: "var(--series-1)" },
                   { key: "ads", label: "Ad spend", color: "var(--series-2)" },
                   { key: "fulfillment", label: "Shipping & handling", color: "var(--series-3)" },
                   { key: "fees", label: "Fees & taxes", color: "var(--series-4)" },
-                  { key: "other", label: "Other costs", color: "var(--ink-3)" },
+                  { key: "other", label: "Expenses", color: "var(--ink-3)" },
                 ]}
               />
-              <div className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-                <PerOrder label="Revenue / order" value={fmtMoney(t.aov, currency)} />
-                <PerOrder label="COGS / order" value={fmtMoney(t.cogsPerOrder, currency)} />
-                <PerOrder label="Fulfillment / order" value={fmtMoney(t.fulfillmentPerOrder, currency)} />
-                <PerOrder label="Fees / order" value={fmtMoney(t.feesPerOrder, currency)} />
-                <PerOrder label="Ad spend / order" value={fmtMoney(t.blendedCpa, currency)} />
-                <PerOrder label="Gross profit / order" value={fmtMoney(t.grossProfitPerOrder, currency)} />
-                <PerOrder label="Net profit / order" value={fmtMoney(t.profitPerOrder, currency)} />
-                <PerOrder label="Units / order" value={fmtNumber(t.unitsPerOrder, 2)} />
-              </div>
             </div>
           </div>
 
-          <div className="mt-6 card overflow-hidden">
+          <div className="mt-4 card overflow-hidden">
             <div className="px-4 pt-4 pb-2">
               <h2 className="text-sm font-semibold">Daily ledger</h2>
-              <p className="text-xs text-ink-3">One row per day. Totals at the bottom match the statement above to the cent.</p>
+              <p className="text-xs text-ink-3">One row per day. The total row matches the statement to the cent.</p>
             </div>
             <div className="overflow-x-auto">
               <table className="table">
@@ -113,12 +105,12 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
                     <th className="text-right">Shipping</th>
                     <th className="text-right">Tax</th>
                     <th className="text-right">Revenue</th>
-                    <th className="text-right">COGS</th>
+                    <th className="text-right">Product cost</th>
                     <th className="text-right">Fulfillment</th>
                     <th className="text-right">Fees</th>
                     <th className="text-right">Gross profit</th>
                     <th className="text-right">Ad spend</th>
-                    <th className="text-right">Other</th>
+                    <th className="text-right">Expenses</th>
                     <th className="text-right">Net profit</th>
                     <th className="text-right">Margin</th>
                   </tr>
@@ -144,7 +136,7 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
                       <td className="text-right tnum text-ink-2">{fmtPercent(d.revenue ? d.netProfit / d.revenue : 0, 0)}</td>
                     </tr>
                   ))}
-                  <tr className="font-semibold bg-surface-2">
+                  <tr className="bg-surface-2 font-semibold">
                     <td>Total</td>
                     <td className="text-right tnum">{fmtNumber(t.orders)}</td>
                     <td className="text-right tnum">{fmtMoney(t.grossSales, currency)}</td>
@@ -168,15 +160,6 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-function PerOrder({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg bg-surface-2 px-3 py-2">
-      <div className="text-ink-3">{label}</div>
-      <div className="mt-0.5 text-sm font-medium tnum">{value}</div>
     </div>
   );
 }

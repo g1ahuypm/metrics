@@ -5,6 +5,7 @@ import { getDataStatus, getMetrics, getProductBreakdown, getRecentOrders } from 
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { KpiCard } from "@/components/KpiCard";
+import { StatStrip } from "@/components/StatStrip";
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart";
 import { BarSeriesChart } from "@/components/charts/BarSeriesChart";
 import { EmptyState } from "@/components/EmptyState";
@@ -30,38 +31,38 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
       {status.orderCount === 0 ? (
         <EmptyState
           title="No orders synced yet"
-          description="Connect your Shopify store in Settings and run a sync to import orders and product costs."
+          description="Connect your Shopify store in Settings and run a sync to import orders and products."
           actionHref="/settings"
           actionLabel="Connect Shopify"
         />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <KpiCard label="Revenue" value={fmtMoney(t.revenue, currency)} raw={t.revenue} previous={p.revenue} />
-            <KpiCard label="Gross sales" value={fmtMoney(t.grossSales, currency)} raw={t.grossSales} previous={p.grossSales} />
-            <KpiCard label="Net sales" value={fmtMoney(t.netSales, currency)} raw={t.netSales} previous={p.netSales} />
             <KpiCard label="Orders" value={fmtNumber(t.orders)} raw={t.orders} previous={p.orders} />
             <KpiCard label="Average order value" value={fmtMoney(t.aov, currency)} raw={t.aov} previous={p.aov} />
-            <KpiCard label="Units sold" value={fmtNumber(t.units)} raw={t.units} previous={p.units} />
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6">
-            <KpiCard label="Discounts" value={fmtMoney(t.discounts, currency)} raw={t.discounts} previous={p.discounts} upIsGood={false} />
-            <KpiCard label="Refunds" value={fmtMoney(t.refunds, currency)} raw={t.refunds} previous={p.refunds} upIsGood={false} />
-            <KpiCard label="Shipping charged" value={fmtMoney(t.shippingCharged, currency)} raw={t.shippingCharged} previous={p.shippingCharged} />
-            <KpiCard label="Taxes collected" value={fmtMoney(t.tax, currency)} raw={t.tax} previous={p.tax} />
             <KpiCard label="New customers" value={fmtNumber(t.newCustomers)} raw={t.newCustomers} previous={p.newCustomers} />
-            <KpiCard label="Returning customers" value={fmtNumber(t.returningCustomers)} raw={t.returningCustomers} previous={p.returningCustomers} />
+            <KpiCard label="Refunds" value={fmtMoney(t.refunds, currency)} raw={t.refunds} previous={p.refunds} upIsGood={false} />
+          </div>
+          <div className="mt-3">
+            <StatStrip
+              title="Sales detail"
+              items={[
+                { label: "Gross sales", value: fmtMoney(t.grossSales, currency), raw: t.grossSales, previous: p.grossSales },
+                { label: "Discounts", value: fmtMoney(t.discounts, currency), raw: t.discounts, previous: p.discounts, upIsGood: false },
+                { label: "Net sales", value: fmtMoney(t.netSales, currency), raw: t.netSales, previous: p.netSales },
+                { label: "Shipping charged", value: fmtMoney(t.shippingCharged, currency), raw: t.shippingCharged, previous: p.shippingCharged },
+                { label: "Taxes collected", value: fmtMoney(t.tax, currency), raw: t.tax, previous: p.tax },
+                { label: "Units sold", value: fmtNumber(t.units), raw: t.units, previous: p.units },
+                { label: "Returning customers", value: fmtNumber(t.returningCustomers), raw: t.returningCustomers, previous: p.returningCustomers },
+              ]}
+            />
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <div className="card p-4">
               <h2 className="mb-2 text-sm font-semibold">Revenue per day</h2>
-              <TimeSeriesChart
-                data={daily}
-                currency={currency}
-                height={240}
-                series={[{ key: "revenue", label: "Revenue", color: "var(--series-1)", area: true }]}
-              />
+              <TimeSeriesChart data={daily} currency={currency} height={240} series={[{ key: "revenue", label: "Revenue", color: "var(--series-1)", area: true }]} />
             </div>
             <div className="card p-4">
               <h2 className="mb-2 text-sm font-semibold">Orders per day</h2>
@@ -77,10 +78,10 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
             </div>
           </div>
 
-          <div className="mt-6 card overflow-hidden">
+          <div className="mt-4 card overflow-hidden">
             <div className="px-4 pt-4 pb-2">
               <h2 className="text-sm font-semibold">Products</h2>
-              <p className="text-xs text-ink-3">Revenue and gross margin per variant after cost of goods.</p>
+              <p className="text-xs text-ink-3">Revenue and margin per variant after product cost.</p>
             </div>
             <div className="overflow-x-auto">
               <table className="table">
@@ -90,8 +91,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
                     <th className="text-right">Orders</th>
                     <th className="text-right">Units</th>
                     <th className="text-right">Revenue</th>
-                    <th className="text-right">Unit cost</th>
-                    <th className="text-right">COGS</th>
+                    <th className="text-right">Product cost</th>
                     <th className="text-right">Gross profit</th>
                     <th className="text-right">Margin</th>
                   </tr>
@@ -106,7 +106,6 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
                       <td className="text-right tnum">{fmtNumber(pr.orders)}</td>
                       <td className="text-right tnum">{fmtNumber(pr.units)}</td>
                       <td className="text-right tnum">{fmtMoney(pr.revenue, currency)}</td>
-                      <td className="text-right tnum text-ink-2">{pr.unitCost === null ? "—" : fmtMoney(pr.unitCost, currency)}</td>
                       <td className="text-right tnum text-ink-2">{fmtMoney(pr.cogs, currency)}</td>
                       <td className="text-right tnum font-medium">{fmtMoney(pr.grossProfit, currency)}</td>
                       <td className="text-right tnum">{fmtPercent(pr.margin, 1)}</td>
@@ -114,7 +113,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
                   ))}
                   {products.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="text-center text-ink-3">No sales in this period</td>
+                      <td colSpan={7} className="text-center text-ink-3">No sales in this period</td>
                     </tr>
                   )}
                 </tbody>
@@ -122,10 +121,10 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
             </div>
           </div>
 
-          <div className="mt-6 card overflow-hidden">
+          <div className="mt-4 card overflow-hidden">
             <div className="px-4 pt-4 pb-2">
               <h2 className="text-sm font-semibold">Recent orders</h2>
-              <p className="text-xs text-ink-3">Latest 50 orders in the selected period.</p>
+              <p className="text-xs text-ink-3">Latest 50 orders in the selected period, with the cost of each one.</p>
             </div>
             <div className="overflow-x-auto">
               <table className="table">
@@ -137,7 +136,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
                     <th>Items</th>
                     <th className="text-right">Total</th>
                     <th className="text-right">Refunded</th>
-                    <th className="text-right">COGS</th>
+                    <th className="text-right">Product cost</th>
                     <th className="text-right">Shipping</th>
                     <th className="text-right">Fees</th>
                     <th className="text-right">Profit</th>
@@ -156,9 +155,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
                           {o.isNewCustomer && <span className="badge">New</span>}
                         </td>
                         <td className="text-ink-2">
-                          <div className="max-w-[220px] truncate">
-                            {o.lineItems.map((li) => `${li.quantity}× ${li.title}`).join(", ")}
-                          </div>
+                          <div className="max-w-[220px] truncate">{o.lineItems.map((li) => `${li.quantity}× ${li.title}`).join(", ")}</div>
                         </td>
                         <td className="text-right tnum">{fmtMoney(o.total, currency)}</td>
                         <td className="text-right tnum text-ink-2">{o.refunded ? fmtMoney(o.refunded, currency) : "—"}</td>

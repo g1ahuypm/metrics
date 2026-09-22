@@ -10,6 +10,7 @@ import {
   LogOut,
   Megaphone,
   Menu,
+  Package,
   Receipt,
   Settings,
   ShoppingBag,
@@ -25,7 +26,8 @@ const NAV = [
   { href: "/profit", label: "Profit & Loss", icon: Landmark },
   { href: "/sales", label: "Sales", icon: ShoppingBag },
   { href: "/ads", label: "Meta Ads", icon: Megaphone },
-  { href: "/costs", label: "Costs & COGS", icon: Receipt },
+  { href: "/products", label: "Product costs", icon: Package },
+  { href: "/expenses", label: "Expenses", icon: Receipt },
   { href: "/team", label: "Team", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings, editorOnly: true },
 ];
