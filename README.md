@@ -61,12 +61,13 @@ Go to **Settings** (owner or admin only).
    | Scope | Used for |
    |---|---|
    | `read_orders` | Orders, refunds, line items, Shopify Payments fees |
-   | `read_all_orders` | Orders older than 60 days (needed for the first 90-day import) |
    | `read_products` | Product and variant names, SKUs, prices, images |
    | `read_inventory` | Shopify's "Cost per item" on each variant (used only when you have not entered supplier costs) |
    | `read_customers` | Customer ID and email on orders, for new vs returning customers |
 
    Read-only scopes are enough; the app never writes to your store.
+
+   Shopify lets custom apps read the last **60 days** of orders. The first sync imports those, and every sync after that keeps adding new orders, so history builds up from the day you connect. (Older orders would need the `read_all_orders` scope, which Shopify only grants to Partner Dashboard apps on request.)
 3. Install the app and paste the Admin API access token plus your `*.myshopify.com` domain.
 4. Run **Sync now**. Your products appear on the **Product costs** page, where you enter supplier costs per bundle size. Shopify's "Cost per item" is used only for products with no tiers.
 
