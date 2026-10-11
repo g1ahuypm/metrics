@@ -371,6 +371,29 @@ function TierEditor({
           <button type="button" className="btn-ghost text-xs" onClick={() => setRows((rs) => [...rs, { quantity: String(nextQty), productCost: "", shippingCost: "" }])}>
             <Plus className="h-3.5 w-3.5" /> Add qty {nextQty}
           </button>
+          {saved.length === 0 && (
+            <button
+              type="button"
+              className="btn-ghost text-xs"
+              disabled={pending}
+              title="Digital downloads, free bonuses, gifts"
+              onClick={() =>
+                start(async () => {
+                  const zero = [{ quantity: 1, productCost: 0, shippingCost: 0 }];
+                  const r = await saveTiersAction(productId, variantId, zero);
+                  if (r?.error) setMsg({ ok: false, text: r.error });
+                  else {
+                    setRows(toRows(zero));
+                    setSaved(zero);
+                    setMsg({ ok: true, text: "Marked as no cost" });
+                    setTimeout(() => setMsg(null), 2000);
+                  }
+                })
+              }
+            >
+              No cost (digital or bonus)
+            </button>
+          )}
           {parsed.length > 0 && nextQty > 1 && (
             <span className="text-xs text-ink-3">
               Qty {nextQty} would currently be estimated at {fmtMoney(estimate(parsed, nextQty), currency)}
