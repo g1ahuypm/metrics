@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { AlertTriangle, Sparkles } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { canEdit } from "@/lib/auth-shared";
 
+/** Says plainly what is not connected yet and what that means for the numbers. */
 export function DataBanner({
   shopifyConnected,
   metaConnected,
@@ -14,17 +15,16 @@ export function DataBanner({
   role: string;
 }) {
   if (shopifyConnected && metaConnected) return null;
-  const missing = [!shopifyConnected && "Shopify", !metaConnected && "Meta Ads"].filter(Boolean).join(" and ");
+  const message = !shopifyConnected
+    ? hasData
+      ? "Shopify is not connected. These are demo numbers."
+      : "Connect Shopify to see your real numbers."
+    : "Meta Ads is not connected, so ad spend shows $0 and profit is before ads.";
   return (
-    <div className="mb-6 flex flex-col gap-2 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+    <div className="mb-4 flex flex-col gap-2 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-2">
-        {hasData ? <Sparkles className="mt-0.5 h-4 w-4 text-warn-text" /> : <AlertTriangle className="mt-0.5 h-4 w-4 text-warn-text" />}
-        <div>
-          <span className="font-medium text-warn-text">{missing} not connected.</span>{" "}
-          <span className="text-ink-2">
-            {hasData ? "You are looking at demo data." : "Connect your accounts to start seeing real numbers."}
-          </span>
-        </div>
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn-text" />
+        <span className="text-ink-2">{message}</span>
       </div>
       {canEdit(role) && (
         <Link href="/settings" className="btn-secondary py-1.5 text-xs">

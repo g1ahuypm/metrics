@@ -129,6 +129,12 @@ function finalize(d: MoneyLines): void {
 
 /** One order's contribution to the daily figures, already narrowed to a product when one is selected. */
 type OrderSlice = {
+  orderId: string;
+  name: string;
+  country: string | null;
+  cancelled: boolean;
+  /** What the customer paid for the product's lines (exact, after all discounts); whole subtotal in store view. */
+  paid: number;
   createdAt: Date;
   grossSales: number;
   discounts: number;
@@ -145,6 +151,10 @@ type OrderSlice = {
 };
 
 const orderSelect = {
+  id: true,
+  name: true,
+  country: true,
+  cancelledAt: true,
   createdAt: true,
   subtotal: true,
   discounts: true,
@@ -169,6 +179,11 @@ async function loadOrderSlices(start: Date, end: Date, productId?: string): Prom
   if (!productId) {
     const orders = await db.order.findMany({ where: { createdAt: { gte: start, lt: end } }, select: orderSelect });
     return orders.map((o) => ({
+      orderId: o.id,
+      name: o.name,
+      country: o.country,
+      cancelled: o.cancelledAt !== null,
+      paid: o.subtotal,
       createdAt: o.createdAt,
       grossSales: o.subtotal + o.discounts,
       discounts: o.discounts,
@@ -205,6 +220,11 @@ async function loadOrderSlices(start: Date, end: Date, productId?: string): Prom
     const giftCogs = gifts.reduce((s, li) => s + li.unitCost * li.quantity, 0) * share;
     const giftShipping = gifts.reduce((s, li) => s + li.shippingCost, 0) * share;
     return {
+      orderId: o.id,
+      name: o.name,
+      country: o.country,
+      cancelled: o.cancelledAt !== null,
+      paid: minePrice,
       createdAt: o.createdAt,
       grossSales: mine.reduce((s, li) => s + li.listPrice, 0),
       discounts: mine.reduce((s, li) => s + (li.listPrice - li.price), 0),
@@ -370,10 +390,10 @@ export type MetricsReport = {
   previous: Totals;
 };
 
-export async function getMetrics(range: DateRange, productId?: string): Promise<MetricsReport> {
+export async function getMetrics(range: DateRange, productId?: string, opts: { previous?: boolean } = {}): Promise<MetricsReport> {
   const [daily, prevDaily] = await Promise.all([
     loadDaily(range.from, range.to, range.tz, productId),
-    loadDaily(range.prevFrom, range.prevTo, range.tz, productId),
+    opts.previous === false ? Promise.resolve([]) : loadDaily(range.prevFrom, range.prevTo, range.tz, productId),
   ]);
   return { range, daily, totals: summarize(daily), previous: summarize(prevDaily) };
 }
@@ -449,70 +469,6 @@ export async function getCampaignBreakdown(range: DateRange, productId?: string)
   return out;
 }
 
-export type ProductRow = {
-  variantId: string | null;
-  title: string;
-  sku: string | null;
-  units: number;
-  orders: number;
-  revenue: number;
-  cogs: number;
-  grossProfit: number;
-  margin: number;
-  unitCost: number | null;
-};
-
-export async function getProductBreakdown(range: DateRange, productId?: string): Promise<ProductRow[]> {
-  const items = await db.orderLineItem.findMany({
-    where: {
-      order: { createdAt: { gte: dayStart(range.from, range.tz), lt: dayEnd(range.to, range.tz) } },
-      ...(productId ? { variant: { productId } } : {}),
-    },
-    include: { variant: { select: { productTitle: true, variantTitle: true, unitCost: true } } },
-  });
-  const map = new Map<string, ProductRow & { orderIds: Set<string> }>();
-  for (const li of items) {
-    const key = li.variantId ?? `title:${li.title}`;
-    let row = map.get(key);
-    if (!row) {
-      const title = li.variant
-        ? li.variant.variantTitle && li.variant.variantTitle !== "Default Title"
-          ? `${li.variant.productTitle} – ${li.variant.variantTitle}`
-          : li.variant.productTitle
-        : li.title;
-      row = {
-        variantId: li.variantId, title, sku: li.sku, units: 0, orders: 0, revenue: 0, cogs: 0, grossProfit: 0, margin: 0,
-        unitCost: li.variant?.unitCost ?? null, orderIds: new Set(),
-      };
-      map.set(key, row);
-    }
-    row.units += li.quantity;
-    row.revenue += li.price;
-    row.cogs += li.unitCost * li.quantity;
-    row.orderIds.add(li.orderId);
-  }
-  const out = [...map.values()].map(({ orderIds, ...r }) => {
-    const revenue = cents(r.revenue);
-    const cogs = cents(r.cogs);
-    const grossProfit = cents(revenue - cogs);
-    return { ...r, revenue, cogs, orders: orderIds.size, grossProfit, margin: safeDiv(grossProfit, revenue) };
-  });
-  out.sort((a, b) => b.revenue - a.revenue);
-  return out;
-}
-
-export async function getRecentOrders(range: DateRange, limit = 50, productId?: string) {
-  return db.order.findMany({
-    where: {
-      createdAt: { gte: dayStart(range.from, range.tz), lt: dayEnd(range.to, range.tz) },
-      ...(productId ? { lineItems: { some: { variant: { productId } } } } : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    take: limit,
-    include: { lineItems: { select: { title: true, quantity: true } } },
-  });
-}
-
 export async function getDataStatus() {
   const [settings, orderCount, insightCount, lastSyncs] = await Promise.all([
     db.settings.findUnique({ where: { id: "default" } }),
@@ -525,7 +481,7 @@ export async function getDataStatus() {
     orderCount,
     insightCount,
     lastSyncs,
-    shopifyConnected: Boolean(settings?.shopifyDomain && settings?.shopifyToken),
+    shopifyConnected: Boolean(settings?.shopifyDomain && (settings?.shopifyClientSecret || settings?.shopifyToken)),
     metaConnected: Boolean(settings?.metaAdAccountId && settings?.metaToken),
   };
 }
@@ -553,4 +509,205 @@ export async function getProductOptions(): Promise<ProductOption[]> {
     map.set(v.productId, p);
   }
   return [...map.values()].sort((a, b) => b.units - a.units || a.title.localeCompare(b.title));
+}
+
+// ---------------------------------------------------------------------------
+// Product page: bundles, campaigns, product list, orders
+// ---------------------------------------------------------------------------
+
+const sliceRevenue = (o: OrderSlice) => o.grossSales - o.discounts - o.refunds + o.shippingCharged + o.tax;
+const sliceProfit = (o: OrderSlice) =>
+  sliceRevenue(o) - o.tax - o.cogs - o.shippingCost - o.handlingCost - o.paymentFees - o.platformFees;
+
+export type BundleRow = {
+  quantity: number; // how many of the product the order holds
+  price: number; // exactly what the customer paid for them
+  orders: number;
+  revenue: number;
+  productCost: number; // supplier product cost, including any free gift in the order
+  shippingCost: number; // supplier shipping and handling
+  fees: number;
+  profit: number; // before ad spend
+};
+
+/**
+ * One row per bundle size and exact price paid (Buy 2 at $84.95 and Buy 2 at
+ * $94.95 are separate rows). Cancelled orders are left out: nothing was sold.
+ */
+export async function getBundleBreakdown(range: DateRange, productId: string): Promise<{ rows: BundleRow[]; cancelled: number }> {
+  const slices = await loadOrderSlices(dayStart(range.from, range.tz), dayEnd(range.to, range.tz), productId);
+  const map = new Map<string, BundleRow>();
+  let cancelled = 0;
+  for (const o of slices) {
+    if (o.cancelled) {
+      cancelled++;
+      continue;
+    }
+    const price = cents(o.paid);
+    const key = `${o.units}|${price}`;
+    const row = map.get(key) ?? { quantity: o.units, price, orders: 0, revenue: 0, productCost: 0, shippingCost: 0, fees: 0, profit: 0 };
+    row.orders += 1;
+    row.revenue += sliceRevenue(o);
+    row.productCost += o.cogs;
+    row.shippingCost += o.shippingCost + o.handlingCost;
+    row.fees += o.paymentFees + o.platformFees;
+    row.profit += sliceProfit(o);
+    map.set(key, row);
+  }
+  const rows = [...map.values()].map((r) => ({
+    ...r,
+    revenue: cents(r.revenue),
+    productCost: cents(r.productCost),
+    shippingCost: cents(r.shippingCost),
+    fees: cents(r.fees),
+    profit: cents(r.profit),
+  }));
+  rows.sort((a, b) => a.quantity - b.quantity || b.orders - a.orders || a.price - b.price);
+  return { rows, cancelled };
+}
+
+export type CampaignSummary = {
+  id: string;
+  name: string;
+  status: string;
+  productId: string | null;
+  spend: number;
+  purchases: number;
+  purchaseValue: number;
+  roas: number; // Meta-reported
+  cpa: number; // Meta-reported
+};
+
+/** Every campaign (including ones with no spend in the period), most spend first. */
+export async function getCampaignSummaries(range: DateRange): Promise<CampaignSummary[]> {
+  const [campaigns, sums] = await Promise.all([
+    db.campaign.findMany({ select: { id: true, name: true, status: true, productId: true } }),
+    db.adInsight.groupBy({
+      by: ["campaignId"],
+      where: { date: { gte: range.from, lte: endOfUtcDay(range.to) } },
+      _sum: { spend: true, purchases: true, purchaseValue: true },
+    }),
+  ]);
+  const byId = new Map(sums.map((s) => [s.campaignId, s._sum]));
+  const out = campaigns.map((c) => {
+    const s = byId.get(c.id);
+    const spend = cents(s?.spend ?? 0);
+    const purchases = s?.purchases ?? 0;
+    const purchaseValue = cents(s?.purchaseValue ?? 0);
+    return { ...c, spend, purchases, purchaseValue, roas: safeDiv(purchaseValue, spend), cpa: safeDiv(spend, purchases) };
+  });
+  out.sort((a, b) => b.spend - a.spend || a.name.localeCompare(b.name));
+  return out;
+}
+
+export type ProductSummary = {
+  id: string;
+  title: string;
+  imageUrl: string | null;
+  orders: number;
+  units: number;
+  revenue: number;
+  costs: number; // product cost, shipping, handling, fees
+  adSpend: number;
+  netProfit: number;
+  margin: number;
+  roas: number; // Shopify revenue ÷ linked campaigns' spend
+  campaigns: number;
+};
+
+/**
+ * Products that earned money or had linked ad spend in the period, each with the
+ * exact same numbers its product page shows. Free gifts and $0 bonuses are not
+ * listed: their cost is already inside the product they ship with.
+ */
+export async function getProductSummaries(range: DateRange): Promise<{ products: ProductSummary[]; unlinkedSpend: number }> {
+  const start = dayStart(range.from, range.tz);
+  const end = dayEnd(range.to, range.tz);
+  const [paidLines, campaigns, variants] = await Promise.all([
+    db.orderLineItem.findMany({
+      where: { price: { gt: 0 }, order: { createdAt: { gte: start, lt: end } }, variant: { productId: { not: null } } },
+      select: { variant: { select: { productId: true } } },
+      distinct: ["variantId"],
+    }),
+    getCampaignSummaries(range),
+    db.productVariant.findMany({ select: { productId: true, productTitle: true, imageUrl: true }, orderBy: { shopifyId: "asc" } }),
+  ]);
+  const ids = new Set<string>();
+  for (const l of paidLines) if (l.variant?.productId) ids.add(l.variant.productId);
+  const campaignCount = new Map<string, number>();
+  let unlinkedSpend = 0;
+  for (const c of campaigns) {
+    if (c.productId) {
+      campaignCount.set(c.productId, (campaignCount.get(c.productId) ?? 0) + 1);
+      if (c.spend > 0) ids.add(c.productId);
+    } else unlinkedSpend += c.spend;
+  }
+  const info = new Map<string, { title: string; imageUrl: string | null }>();
+  for (const v of variants) if (v.productId && !info.has(v.productId)) info.set(v.productId, { title: v.productTitle, imageUrl: v.imageUrl });
+
+  const products = await Promise.all(
+    [...ids].filter((id) => info.has(id)).map(async (id) => {
+      const { totals: t } = await getMetrics(range, id, { previous: false });
+      return {
+        id,
+        title: info.get(id)!.title,
+        imageUrl: info.get(id)!.imageUrl,
+        orders: t.orders,
+        units: t.units,
+        revenue: t.revenue,
+        costs: cents(t.cogs + t.fulfillmentCost + t.totalFees + t.tax),
+        adSpend: t.adSpend,
+        netProfit: t.netProfit,
+        margin: t.margin,
+        roas: t.mer,
+        campaigns: campaignCount.get(id) ?? 0,
+      };
+    }),
+  );
+  products.sort((a, b) => b.revenue - a.revenue || b.adSpend - a.adSpend);
+  return { products, unlinkedSpend: cents(unlinkedSpend) };
+}
+
+export type OrderRow = {
+  id: string;
+  name: string;
+  createdAt: Date;
+  country: string | null;
+  status: string;
+  cancelled: boolean;
+  items: string;
+  revenue: number; // what the customer paid, less refunds (Shopify total sales)
+  productCost: number;
+  shippingCost: number; // supplier shipping + handling
+  fees: number;
+  profit: number; // before ad spend and expenses
+};
+
+/** Orders placed in the period, newest first, with each order's own profit. */
+export async function getOrderRows(range: DateRange, limit = 500): Promise<OrderRow[]> {
+  const orders = await db.order.findMany({
+    where: { createdAt: { gte: dayStart(range.from, range.tz), lt: dayEnd(range.to, range.tz) } },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    include: { lineItems: { select: { title: true, quantity: true, price: true } } },
+  });
+  return orders.map((o) => {
+    const revenue = cents(o.subtotal + o.shippingCharged + o.tax - o.refunded);
+    const fees = cents(o.transactionFees + o.platformFees);
+    const shippingCost = cents(o.shippingCost + o.handlingCost);
+    return {
+      id: o.id,
+      name: o.name,
+      createdAt: o.createdAt,
+      country: o.country,
+      status: o.cancelledAt ? "Cancelled" : (o.financialStatus ?? "").toLowerCase().replace(/_/g, " "),
+      cancelled: o.cancelledAt !== null,
+      items: o.lineItems.map((li) => `${li.quantity}× ${li.title}${li.price === 0 ? " (free)" : ""}`).join(", "),
+      revenue,
+      productCost: cents(o.cogs),
+      shippingCost,
+      fees,
+      profit: cents(revenue - o.tax - o.cogs - shippingCost - fees),
+    };
+  });
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, Gift, Info, Loader2, Plus, Search, Trash2, Undo2 } from "lucide-react";
+import { useState, useTransition } from "react";
+import { Check, ChevronDown, ChevronRight, Copy, Gift, Loader2, Plus, Trash2, Undo2 } from "lucide-react";
 import { clearVariantTiersAction, saveTiersAction, type TierInput } from "@/lib/actions/costs";
 import { resolveTier } from "@/lib/costing";
 import { MARKETS, marketLabel } from "@/lib/constants";
@@ -33,76 +33,11 @@ export type ProductCostData = {
   isFreeGift: boolean;
 };
 
-const hasAny = (t: TiersByCountry) => Object.values(t).some((x) => x.length > 0);
-
-/** Costs are entered per country. Tiers under "" are either "No cost" ($0 everywhere) or older all-country costs. */
-function costCoverage(p: ProductCostData) {
-  const all = p.tiers[""] ?? [];
-  const noCost = all.length > 0 && all.every((t) => t.productCost === 0 && t.shippingCost === 0);
-  const legacyAll = all.length > 0 && !noCost ? all : [];
-  const covered = (c: string) =>
-    noCost || legacyAll.length > 0 || (p.tiers[c]?.length ?? 0) > 0 || (p.variants.length > 0 && p.variants.every((v) => (v.tiers[c]?.length ?? 0) > 0));
-  const soldIn = Object.entries(p.unitsByCountry).filter(([, n]) => n > 0).map(([c]) => c);
-  const missing = soldIn.filter((c) => !covered(c)).sort((a, b) => (p.unitsByCountry[b] ?? 0) - (p.unitsByCountry[a] ?? 0));
-  const anyCountry = MARKETS.some((m) => (p.tiers[m.code]?.length ?? 0) > 0) || p.variants.some((v) => hasAny(v.tiers));
-  return { noCost, legacyAll, missing, anyCountry };
-}
+import { costCoverage, hasAnyTiers as hasAny } from "@/lib/costcoverage";
 
 const countryName = (code: string) => (code ? (MARKETS.find((m) => m.code === code)?.label ?? code) : "other countries");
 
 // ---------------------------------------------------------------------------
-
-export function ProductCostList({ products, currency, editor }: { products: ProductCostData[]; currency: string; editor: boolean }) {
-  const [query, setQuery] = useState("");
-  const [onlyMissing, setOnlyMissing] = useState(false);
-
-  const isMissing = (p: ProductCostData) => costCoverage(p).missing.length > 0;
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return products.filter((p) => {
-      if (onlyMissing && !isMissing(p)) return false;
-      if (!q) return true;
-      return p.title.toLowerCase().includes(q) || p.variants.some((v) => v.sku?.toLowerCase().includes(q) || v.title.toLowerCase().includes(q));
-    });
-  }, [products, query, onlyMissing]);
-
-  const missingCount = products.filter(isMissing).length;
-
-  return (
-    <div>
-      <div className="card mb-4 flex gap-3 p-4 text-sm">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-        <div className="text-ink-2">
-          <p>
-            What your supplier charges per order, for each country. <strong className="text-ink">Qty 2</strong> is the total for a two-book
-            order, and so on. Saving updates every past order right away.
-          </p>
-        </div>
-      </div>
-
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 items-center gap-2">
-          <div className="relative flex-1 sm:max-w-xs">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-ink-3" />
-            <input className="input pl-8" placeholder="Search products or SKUs" value={query} onChange={(e) => setQuery(e.target.value)} />
-          </div>
-          <label className="flex items-center gap-1.5 text-xs text-ink-2">
-            <input type="checkbox" checked={onlyMissing} onChange={(e) => setOnlyMissing(e.target.checked)} />
-            Missing costs only {missingCount > 0 && <span className="badge text-warn-text">{missingCount}</span>}
-          </label>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        {filtered.map((p) => (
-          <ProductCard key={p.productId} product={p} currency={currency} editor={editor} />
-        ))}
-        {filtered.length === 0 && <div className="card p-8 text-center text-sm text-ink-3">No products match.</div>}
-      </div>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 
@@ -146,7 +81,8 @@ function CountryTabs({
   );
 }
 
-function ProductCard({ product, currency, editor }: { product: ProductCostData; currency: string; editor: boolean }) {
+/** Supplier costs for one product, per country and bundle size. Saving re-prices its orders. */
+export function ProductCostEditor({ product, currency, editor }: { product: ProductCostData; currency: string; editor: boolean }) {
   const [showVariants, setShowVariants] = useState(false);
   // Open on the country with the most sales.
   const [country, setCountry] = useState(() => [...MARKETS].sort((a, b) => (product.unitsByCountry[b.code] ?? 0) - (product.unitsByCountry[a.code] ?? 0))[0].code);
@@ -173,15 +109,12 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
     <div className="card overflow-hidden">
       <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
-          {product.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={product.imageUrl} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
-          ) : (
-            <div className="h-12 w-12 shrink-0 rounded-lg bg-surface-2" />
-          )}
           <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold">{product.title}</h3>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
+            <h2 className="text-sm font-semibold">Your costs</h2>
+            <p className="mt-0.5 text-xs text-ink-3">
+              What your supplier charges per order, by country and bundle size. Saving updates every past order right away.
+            </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
               {product.isFreeGift ? (
                 <span className="badge text-accent">
                   <Gift className="h-3 w-3" /> Free gift
@@ -189,8 +122,7 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
               ) : (
                 <span className={`badge ${status.tone}`}>{status.label}</span>
               )}
-              <span>{product.variants.length} variant{product.variants.length === 1 ? "" : "s"}</span>
-              <span>{fmtNumber(units)} units sold</span>
+              <span>{fmtNumber(units)} units sold (all time)</span>
               {shopifyCost !== null && <span>Shopify cost per item {fmtMoney(shopifyCost, currency)}</span>}
             </div>
             {product.isFreeGift && (
@@ -200,10 +132,12 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
             )}
           </div>
         </div>
-        <button type="button" className="btn-ghost text-xs" onClick={() => setShowVariants((v) => !v)}>
-          {showVariants ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          Variants {overrides > 0 && <span className="badge">{overrides} custom</span>}
-        </button>
+        {product.variants.length > 1 && (
+          <button type="button" className="btn-ghost text-xs" onClick={() => setShowVariants((v) => !v)}>
+            {showVariants ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            Different cost per variant {overrides > 0 && <span className="badge">{overrides} custom</span>}
+          </button>
+        )}
       </div>
 
       {coverage.noCost ? (

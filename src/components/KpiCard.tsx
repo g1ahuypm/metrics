@@ -39,8 +39,8 @@ export function KpiCard({
         }`} title={value}>
         {value}
       </div>
+      {sub && <div className="mt-1 truncate text-xs font-medium text-ink-2" title={sub}>{sub}</div>}
       <div className="mt-1 flex items-center gap-1.5 text-xs">
-        {sub && <span className="mr-1 font-medium text-ink-2">{sub}</span>}
         {change !== undefined && (
           <span className={`inline-flex items-center gap-0.5 ${tone}`}>
             <Icon className="h-3.5 w-3.5" />

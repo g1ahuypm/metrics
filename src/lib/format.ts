@@ -39,10 +39,11 @@ export function fmtDate(d: Date | string, opts: Intl.DateTimeFormatOptions = { m
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", ...opts }).format(date);
 }
 
-export function fmtDateTime(d: Date | string | null | undefined): string {
+export function fmtDateTime(d: Date | string | null | undefined, timeZone?: string): string {
   if (!d) return "never";
   const date = typeof d === "string" ? new Date(d) : d;
   return new Intl.DateTimeFormat("en-US", {
+    timeZone,
     month: "short",
     day: "numeric",
     hour: "numeric",

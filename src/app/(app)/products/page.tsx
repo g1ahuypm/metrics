@@ -1,109 +1,150 @@
-import { canEdit, requireUser } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { getSettingsRow } from "@/lib/integrations/config";
+import Link from "next/link";
+import { ChevronRight, Gift } from "lucide-react";
+import { requireUser } from "@/lib/auth";
+import { getScope } from "@/lib/scope";
+import { fmtMoney, fmtMultiple, fmtNumber, fmtPercent } from "@/lib/format";
+import { getDataStatus, getProductSummaries } from "@/lib/metrics";
+import { getProductCostData } from "@/lib/productcosts";
+import { costCoverage } from "@/lib/costcoverage";
+import { marketLabel } from "@/lib/constants";
+import { productHref } from "@/lib/links";
 import { PageHeader } from "@/components/PageHeader";
+import { DateRangePicker } from "@/components/DateRangePicker";
 import { EmptyState } from "@/components/EmptyState";
-import { ProductCostList, type ProductCostData } from "./ProductCostList";
 
-export default async function ProductsPage() {
-  const user = await requireUser();
-  const editor = canEdit(user.role);
-  const [settings, variants, tiers, sold] = await Promise.all([
-    getSettingsRow(),
-    db.productVariant.findMany({ orderBy: [{ productTitle: "asc" }, { variantTitle: "asc" }] }),
-    db.costTier.findMany({ orderBy: { quantity: "asc" } }),
-    db.orderLineItem.findMany({
-      where: { variantId: { not: null }, order: { cancelledAt: null } },
-      select: { orderId: true, variantId: true, quantity: true, price: true, order: { select: { country: true } } },
-    }),
-  ]);
-  const productOfVariant = new Map(variants.map((v) => [v.id, v.productId ?? `variant:${v.shopifyId}`]));
-  // Free gifts: products that only ever appear at $0 in orders.
-  const lineStats = new Map<string, { lines: number; zero: number }>();
-  for (const s of sold) {
-    const pid = s.variantId ? productOfVariant.get(s.variantId) : undefined;
-    if (!pid) continue;
-    const st = lineStats.get(pid) ?? { lines: 0, zero: 0 };
-    st.lines += 1;
-    if (s.price === 0) st.zero += 1;
-    lineStats.set(pid, st);
-  }
+function Thumb({ url }: { url: string | null }) {
+  // eslint-disable-next-line @next/next/no-img-element
+  return url ? <img src={url} alt="" className="h-9 w-9 shrink-0 rounded-md object-cover" /> : <div className="h-9 w-9 shrink-0 rounded-md bg-surface-2" />;
+}
 
-  // Units sold per variant, which bundle quantities customers buy, and where orders ship.
-  const soldByVariant = new Map<string, { units: number; quantities: Set<number>; countries: Record<string, number> }>();
-  for (const s of sold) {
-    if (!s.variantId) continue;
-    const row = soldByVariant.get(s.variantId) ?? { units: 0, quantities: new Set<number>(), countries: {} };
-    row.units += s.quantity;
-    const c = s.order.country ?? "";
-    row.countries[c] = (row.countries[c] ?? 0) + s.quantity;
-    soldByVariant.set(s.variantId, row);
-  }
-  const qtyPerOrder = new Map<string, number>();
-  for (const s of sold) if (s.variantId) qtyPerOrder.set(`${s.orderId}|${s.variantId}`, (qtyPerOrder.get(`${s.orderId}|${s.variantId}`) ?? 0) + s.quantity);
-  for (const [key, q] of qtyPerOrder) soldByVariant.get(key.split("|")[1])?.quantities.add(q);
-
-  const products = new Map<string, ProductCostData>();
-  for (const v of variants) {
-    const productId = v.productId ?? `variant:${v.shopifyId}`;
-    let p = products.get(productId);
-    if (!p) {
-      const st = lineStats.get(productId) ?? { lines: 0, zero: 0 };
-      p = {
-        productId,
-        title: v.productTitle,
-        imageUrl: v.imageUrl,
-        tiers: {},
-        unitsByCountry: {},
-        variants: [],
-        isFreeGift: st.lines >= 3 && st.zero === st.lines,
-      };
-      products.set(productId, p);
-    }
-    const s = soldByVariant.get(v.id);
-    p.variants.push({
-      id: v.id,
-      shopifyId: v.shopifyId,
-      title: v.variantTitle && v.variantTitle !== "Default Title" ? v.variantTitle : "Default",
-      sku: v.sku,
-      price: v.price,
-      shopifyUnitCost: v.unitCost,
-      unitsSold: s?.units ?? 0,
-      quantitiesBought: s ? [...s.quantities].sort((a, b) => a - b) : [],
-      tiers: {},
-    });
-    for (const [c, n] of Object.entries(s?.countries ?? {})) p.unitsByCountry[c] = (p.unitsByCountry[c] ?? 0) + n;
-  }
-  for (const t of tiers) {
-    const p = products.get(t.productId);
-    if (!p) continue;
-    const tier = { quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost };
-    const target = t.variantId === "" ? p.tiers : p.variants.find((v) => v.shopifyId === t.variantId)?.tiers;
-    if (!target) continue;
-    (target[t.country] ??= []).push(tier);
-  }
-  const hasTiers = (p: ProductCostData) => Object.values(p.tiers).some((t) => t.length > 0);
-  const list = [...products.values()].sort((a, b) => {
-    const au = a.variants.reduce((s, v) => s + v.unitsSold, 0);
-    const bu = b.variants.reduce((s, v) => s + v.unitsSold, 0);
-    return bu - au || a.title.localeCompare(b.title);
-  });
+export default async function ProductsPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {
+  await requireUser();
+  const { range } = await getScope(await searchParams);
+  const [{ products, unlinkedSpend }, costData, status] = await Promise.all([getProductSummaries(range), getProductCostData(), getDataStatus()]);
+  const currency = status.settings?.currency ?? "USD";
+  const coverage = new Map(costData.map((p) => [p.productId, { ...costCoverage(p), isFreeGift: p.isFreeGift }]));
+  const listed = new Set(products.map((p) => p.id));
+  // Everything else, with the ones that need costs first.
+  const others = costData
+    .filter((p) => !listed.has(p.productId) && !p.productId.startsWith("variant:"))
+    .map((p) => ({ ...p, cov: coverage.get(p.productId)! }))
+    .sort((a, b) => Number(b.cov.missing.length > 0) - Number(a.cov.missing.length > 0) || a.title.localeCompare(b.title));
+  const missingText = (id: string) => {
+    const m = coverage.get(id)?.missing ?? [];
+    return m.length ? `Missing costs: ${m.map((c) => (c ? marketLabel(c) : "unknown")).join(", ")}` : null;
+  };
 
   return (
     <div>
-      <PageHeader
-        title="Product costs"
-        description="What you pay your supplier for each product, per bundle size. Every order is priced from these numbers automatically."
-      />
-      {list.length === 0 ? (
-        <EmptyState
-          title="No products yet"
-          description="Connect Shopify in Settings and run a sync to import your products, then enter supplier costs here."
-          actionHref="/settings"
-          actionLabel="Connect Shopify"
-        />
+      <PageHeader title="Products" description={`Each product's real profit, with only its own campaigns' ad spend · ${range.label}`}>
+        <DateRangePicker range={range} />
+      </PageHeader>
+
+      {products.length === 0 && others.length === 0 ? (
+        <EmptyState title="No products yet" description="Connect Shopify in Settings and run a sync to import your products." actionHref="/settings" actionLabel="Connect Shopify" />
       ) : (
-        <ProductCostList products={list} currency={settings.currency} editor={editor} />
+        <>
+          <div className="card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th className="text-right">Orders</th>
+                    <th className="text-right">Revenue</th>
+                    <th className="text-right">Costs</th>
+                    <th className="text-right">Ad spend</th>
+                    <th className="text-right">ROAS</th>
+                    <th className="text-right">Net profit</th>
+                    <th className="text-right">Margin</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map((p) => {
+                    const missing = missingText(p.id);
+                    return (
+                      <tr key={p.id} className="cursor-pointer">
+                        <td>
+                          <Link href={productHref(p.id)} className="flex min-w-[220px] items-center gap-3">
+                            <Thumb url={p.imageUrl} />
+                            <span className="min-w-0">
+                              <span className="block truncate font-medium">{p.title}</span>
+                              <span className="block text-[11px] text-ink-3">
+                                {missing ? (
+                                  <span className="text-warn-text">{missing}</span>
+                                ) : p.campaigns === 0 ? (
+                                  <span className="text-warn-text">No campaigns linked</span>
+                                ) : (
+                                  `${p.campaigns} campaign${p.campaigns === 1 ? "" : "s"} linked`
+                                )}
+                              </span>
+                            </span>
+                          </Link>
+                        </td>
+                        <td className="text-right tnum">{fmtNumber(p.orders)}</td>
+                        <td className="text-right tnum">{fmtMoney(p.revenue, currency)}</td>
+                        <td className="text-right tnum text-ink-2">{fmtMoney(p.costs, currency)}</td>
+                        <td className="text-right tnum text-ink-2">{fmtMoney(p.adSpend, currency)}</td>
+                        <td className="text-right tnum">{p.adSpend > 0 ? fmtMultiple(p.roas) : "—"}</td>
+                        <td className={`text-right tnum font-semibold ${p.netProfit < 0 ? "text-bad-text" : ""}`}>{fmtMoney(p.netProfit, currency)}</td>
+                        <td className="text-right tnum">{p.revenue > 0 ? fmtPercent(p.margin, 0) : "—"}</td>
+                        <td className="text-right">
+                          <Link href={productHref(p.id)} className="btn-ghost px-1.5 py-1" aria-label={`Open ${p.title}`}>
+                            <ChevronRight className="h-4 w-4" />
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {products.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="text-center text-ink-3">
+                        No sales in this period.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {unlinkedSpend > 0 && (
+              <p className="border-t border-border px-4 py-2.5 text-xs text-warn-text">
+                {fmtMoney(unlinkedSpend, currency)} of ad spend in this period is from campaigns not linked to any product. Open a product to link its campaigns.
+              </p>
+            )}
+          </div>
+
+          {others.length > 0 && (
+            <div className="mt-6">
+              <h2 className="mb-1 text-sm font-semibold">Other products</h2>
+              <p className="mb-3 text-xs text-ink-3">
+                No sales in this period. Free gifts and bonuses are counted inside the product they ship with. Open one to set its costs.
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {others.map((p) => {
+                  const missing = missingText(p.productId);
+                  return (
+                    <Link key={p.productId} href={productHref(p.productId)} className="card flex min-w-0 items-center gap-3 p-2.5 hover:border-border-strong">
+                      <Thumb url={p.imageUrl} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm">{p.title}</span>
+                        <span className="block text-[11px] text-ink-3">
+                          {p.cov.isFreeGift && (
+                            <span className="mr-2 inline-flex items-center gap-1 text-accent">
+                              <Gift className="h-3 w-3" /> Free gift
+                            </span>
+                          )}
+                          {missing ? <span className="text-warn-text">{missing}</span> : p.cov.noCost ? "No cost" : p.cov.anyCountry ? "Costs set" : "No costs entered"}
+                        </span>
+                      </span>
+                      <ChevronRight className="h-4 w-4 text-ink-3" />
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

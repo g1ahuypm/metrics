@@ -64,8 +64,8 @@ export default async function ExpensesPage() {
   return (
     <div>
       <PageHeader
-        title="Expenses"
-        description="Everything you pay that is not a product or an ad: apps, contractors, agencies, fees. All of it is deducted on the Profit & Loss."
+        title="Expenses & fees"
+        description="Everything you pay that is not a product or an ad: apps, contractors, agencies, payment fees. All of it comes out of net profit."
       />
 
       <div className="grid gap-4 lg:grid-cols-3 lg:items-start">

@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import { resolveRange, type DateRange } from "./dates";
 import { db } from "./db";
 
-export const PRODUCT_COOKIE = "pd_product";
 export const RANGE_COOKIE = "pd_range";
 
 export type Scope = { productId: string | undefined; range: DateRange };
@@ -15,7 +14,8 @@ export type Scope = { productId: string | undefined; range: DateRange };
  */
 export async function getScope(sp: { range?: string; from?: string; to?: string; product?: string } = {}): Promise<Scope> {
   const jar = await cookies();
-  const productId = sp.product !== undefined ? sp.product || undefined : jar.get(PRODUCT_COOKIE)?.value || undefined;
+  // A product is only ever chosen by its own page (or an export link), never remembered.
+  const productId = sp.product || undefined;
   let rangeParams = sp;
   if (!sp.range && !(sp.from && sp.to)) {
     const saved = jar.get(RANGE_COOKIE)?.value;

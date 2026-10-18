@@ -1,15 +1,12 @@
+import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { scopeQuery } from "@/lib/dates";
 import { getScope } from "@/lib/scope";
+import { productHref } from "@/lib/links";
 import { fmtMoney, fmtMultiple, fmtNumber, fmtPercent } from "@/lib/format";
-import { getCampaignBreakdown, getDataStatus, getMetrics, getProductOptions } from "@/lib/metrics";
-import { canEdit } from "@/lib/auth-shared";
-import { ProductScope } from "@/components/ProductScope";
-import { AutoMatchButton, CampaignProductSelect } from "./CampaignLinks";
+import { getCampaignBreakdown, getCampaignSummaries, getDataStatus, getMetrics, getProductOptions } from "@/lib/metrics";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { KpiCard } from "@/components/KpiCard";
-import { StatStrip } from "@/components/StatStrip";
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart";
 import { EmptyState } from "@/components/EmptyState";
 
@@ -24,42 +21,28 @@ function statusBadge(status: string) {
   );
 }
 
-export default async function AdsPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string; product?: string }> }) {
-  const user = await requireUser();
-  const editor = canEdit(user.role);
-  const sp = await searchParams;
-  const { range, productId } = await getScope(sp);
-  const [report, status, campaigns, products] = await Promise.all([
-    getMetrics(range, productId),
+export default async function AdsPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {
+  await requireUser();
+  const { range } = await getScope(await searchParams);
+  const [report, status, detail, all, products] = await Promise.all([
+    getMetrics(range),
     getDataStatus(),
-    getCampaignBreakdown(range, productId),
+    getCampaignBreakdown(range),
+    getCampaignSummaries(range),
     getProductOptions(),
   ]);
-  const product = productId ? products.find((p) => p.id === productId) : undefined;
-  const unlinked = campaigns.filter((c) => !c.productId).length;
   const titleOf = new Map(products.map((p) => [p.id, p.title]));
+  const detailOf = new Map(detail.map((d) => [d.id, d]));
+  const campaigns = all.filter((c) => c.spend > 0);
   const { totals: t, previous: p, daily } = report;
   const currency = status.settings?.currency ?? "USD";
-
-  const totalRow = campaigns.reduce(
-    (acc, c) => {
-      acc.spend += c.spend;
-      acc.impressions += c.impressions;
-      acc.clicks += c.clicks;
-      acc.purchases += c.purchases;
-      acc.purchaseValue += c.purchaseValue;
-      return acc;
-    },
-    { spend: 0, impressions: 0, clicks: 0, purchases: 0, purchaseValue: 0 },
-  );
+  const unlinked = campaigns.filter((c) => !c.productId);
 
   return (
     <div>
-      <PageHeader title="Meta Ads" description="Facebook and Instagram campaign performance, matched against your real sales">
+      <PageHeader title="Meta Ads" description={`Every campaign as Meta reports it · ${range.label}`}>
         <DateRangePicker range={range} />
       </PageHeader>
-
-      <ProductScope product={product} query={scopeQuery(range, productId)} page="ads" />
 
       {status.insightCount === 0 ? (
         <EmptyState
@@ -70,150 +53,96 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
         />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <KpiCard label="Ad spend" value={fmtMoney(t.adSpend, currency)} raw={t.adSpend} previous={p.adSpend} upIsGood={false} />
-            <KpiCard label="Meta ROAS" value={fmtMultiple(t.roas)} raw={t.roas} previous={p.roas} />
-            <KpiCard label="Meta CPA" value={fmtMoney(t.cpa, currency)} raw={t.cpa} previous={p.cpa} upIsGood={false} />
-            <KpiCard label="Meta purchases" value={fmtNumber(t.adPurchases)} raw={t.adPurchases} previous={p.adPurchases} />
-            <KpiCard label="MER (revenue ÷ spend)" value={fmtMultiple(t.mer)} raw={t.mer} previous={p.mer} />
-          </div>
-          <div className="mt-3">
-            <StatStrip
-              title="Delivery and funnel"
-              items={[
-                { label: "Impressions", value: fmtNumber(t.impressions), raw: t.impressions, previous: p.impressions },
-                { label: "Reach", value: fmtNumber(t.reach), raw: t.reach, previous: p.reach },
-                { label: "Link clicks", value: fmtNumber(t.clicks), raw: t.clicks, previous: p.clicks },
-                { label: "CTR", value: fmtPercent(t.ctr, 2), raw: t.ctr, previous: p.ctr },
-                { label: "CPC", value: fmtMoney(t.cpc, currency), raw: t.cpc, previous: p.cpc, upIsGood: false },
-                { label: "CPM", value: fmtMoney(t.cpm, currency), raw: t.cpm, previous: p.cpm, upIsGood: false },
-                { label: "Cost per new customer", value: fmtMoney(t.ncpa, currency), raw: t.ncpa, previous: p.ncpa, upIsGood: false },
-              ]}
-            />
+            <KpiCard label="True ROAS" value={fmtMultiple(t.mer)} raw={t.mer} previous={p.mer} sub="Shopify revenue ÷ spend" />
+            <KpiCard label="Meta ROAS" value={fmtMultiple(t.roas)} raw={t.roas} previous={p.roas} sub={`${fmtNumber(t.adPurchases)} Meta purchases`} />
+            <KpiCard label="Cost per order" value={fmtMoney(t.blendedCpa, currency)} raw={t.blendedCpa} previous={p.blendedCpa} upIsGood={false} sub={`${fmtNumber(t.orders)} Shopify orders`} />
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <div className="card p-4">
-              <h2 className="mb-2 text-sm font-semibold">Ad spend vs Meta-attributed revenue</h2>
+          {daily.length > 1 && (
+            <div className="card mt-4 p-4">
+              <h2 className="mb-2 text-sm font-semibold">Ad spend vs Shopify revenue</h2>
               <TimeSeriesChart
                 data={daily}
                 currency={currency}
-                height={240}
+                height={220}
                 series={[
-                  { key: "adPurchaseValue", label: "Meta purchase value", color: "var(--series-1)", area: true },
+                  { key: "revenue", label: "Shopify revenue", color: "var(--series-1)", area: true },
                   { key: "adSpend", label: "Ad spend", color: "var(--series-2)" },
                 ]}
               />
             </div>
-            <div className="card p-4">
-              <h2 className="mb-2 text-sm font-semibold">Meta purchases vs Shopify orders</h2>
-              <p className="mb-2 text-xs text-ink-3">A gap between the two is normal. Meta counts by attribution window; Shopify counts real orders.</p>
-              <TimeSeriesChart
-                data={daily}
-                format="number"
-                height={216}
-                series={[
-                  { key: "orders", label: "Shopify orders", color: "var(--series-1)" },
-                  { key: "adPurchases", label: "Meta purchases", color: "var(--series-2)" },
-                ]}
-              />
-            </div>
-          </div>
+          )}
 
-          <div className="mt-4 card overflow-hidden">
-            <div className="flex flex-col gap-2 px-4 pt-4 pb-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2 className="text-sm font-semibold">Campaigns</h2>
-                <p className="text-xs text-ink-3">
-                  Sorted by spend. Metrics are Meta-reported for the selected period.
-                  {editor && " Use \u201cSells product\u201d to link each campaign to the product it advertises; the product selector then shows only those campaigns."}
-                  {!productId && unlinked > 0 && <span className="text-warn-text"> {unlinked} campaign{unlinked === 1 ? "" : "s"} not linked yet.</span>}
-                </p>
-              </div>
-              {editor && <AutoMatchButton />}
+          {unlinked.length > 0 && (
+            <div className="mt-4 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-ink-2">
+              {unlinked.length} campaign{unlinked.length === 1 ? " is" : "s are"} not linked to a product ({fmtMoney(unlinked.reduce((s, c) => s + c.spend, 0), currency)} spend). Link
+              them on the{" "}
+              <Link href="/products" className="font-medium text-accent hover:underline">
+                product&apos;s page
+              </Link>
+              .
             </div>
+          )}
+
+          <div className="card mt-4 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="table">
                 <thead>
                   <tr>
                     <th>Campaign</th>
-                    <th>Sells product</th>
-                    <th>Status</th>
+                    <th>Product</th>
                     <th className="text-right">Spend</th>
                     <th className="text-right">Purchases</th>
-                    <th className="text-right">Revenue</th>
                     <th className="text-right">ROAS</th>
                     <th className="text-right">CPA</th>
                     <th className="text-right">CTR</th>
                     <th className="text-right">CPC</th>
                     <th className="text-right">CPM</th>
-                    <th className="text-right">Impr.</th>
-                    <th className="text-right">Freq.</th>
-                    <th className="text-right">ATC</th>
-                    <th className="text-right">Checkouts</th>
-                    <th className="text-right">Budget/day</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {campaigns.map((c) => (
-                    <tr key={c.id}>
-                      <td>
-                        <div className="max-w-[260px] truncate font-medium">{c.name}</div>
-                        {c.objective && <div className="text-[11px] text-ink-3">{c.objective.replace(/^OUTCOME_/, "").toLowerCase()}</div>}
-                      </td>
-                      <td>
-                        {editor ? (
-                          <CampaignProductSelect campaignId={c.id} productId={c.productId} products={products.map((p) => ({ id: p.id, title: p.title }))} />
-                        ) : (
-                          <span className="text-xs text-ink-2">{c.productId ? titleOf.get(c.productId) ?? "Linked" : "Not linked"}</span>
-                        )}
-                      </td>
-                      <td>{statusBadge(c.status)}</td>
-                      <td className="text-right tnum">{fmtMoney(c.spend, currency)}</td>
-                      <td className="text-right tnum">{fmtNumber(c.purchases)}</td>
-                      <td className="text-right tnum">{fmtMoney(c.purchaseValue, currency)}</td>
-                      <td className={`text-right tnum font-medium ${c.roas >= 2 ? "text-good-text" : c.roas > 0 && c.roas < 1 ? "text-bad-text" : ""}`}>{fmtMultiple(c.roas)}</td>
-                      <td className="text-right tnum">{fmtMoney(c.cpa, currency)}</td>
-                      <td className="text-right tnum">{fmtPercent(c.ctr, 2)}</td>
-                      <td className="text-right tnum">{fmtMoney(c.cpc, currency)}</td>
-                      <td className="text-right tnum">{fmtMoney(c.cpm, currency)}</td>
-                      <td className="text-right tnum">{fmtNumber(c.impressions)}</td>
-                      <td className="text-right tnum text-ink-2">{fmtNumber(c.frequency, 2)}</td>
-                      <td className="text-right tnum text-ink-2">{fmtNumber(c.addToCart)}</td>
-                      <td className="text-right tnum text-ink-2">{fmtNumber(c.initiateCheckout)}</td>
-                      <td className="text-right tnum text-ink-2">{c.dailyBudget ? fmtMoney(c.dailyBudget, currency) : "—"}</td>
-                    </tr>
-                  ))}
-                  {campaigns.length > 0 && (
-                    <tr className="font-semibold">
-                      <td>Total</td>
-                      <td></td>
-                      <td></td>
-                      <td className="text-right tnum">{fmtMoney(totalRow.spend, currency)}</td>
-                      <td className="text-right tnum">{fmtNumber(totalRow.purchases)}</td>
-                      <td className="text-right tnum">{fmtMoney(totalRow.purchaseValue, currency)}</td>
-                      <td className="text-right tnum">{fmtMultiple(totalRow.spend ? totalRow.purchaseValue / totalRow.spend : 0)}</td>
-                      <td className="text-right tnum">{fmtMoney(totalRow.purchases ? totalRow.spend / totalRow.purchases : 0, currency)}</td>
-                      <td className="text-right tnum">{fmtPercent(totalRow.impressions ? totalRow.clicks / totalRow.impressions : 0, 2)}</td>
-                      <td className="text-right tnum">{fmtMoney(totalRow.clicks ? totalRow.spend / totalRow.clicks : 0, currency)}</td>
-                      <td className="text-right tnum">{fmtMoney(totalRow.impressions ? (totalRow.spend / totalRow.impressions) * 1000 : 0, currency)}</td>
-                      <td className="text-right tnum">{fmtNumber(totalRow.impressions)}</td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                    </tr>
-                  )}
+                  {campaigns.map((c) => {
+                    const d = detailOf.get(c.id);
+                    return (
+                      <tr key={c.id}>
+                        <td>
+                          <div className="max-w-[300px] truncate font-medium" title={c.name}>{c.name}</div>
+                          <div className="mt-0.5">{statusBadge(c.status)}</div>
+                        </td>
+                        <td>
+                          {c.productId ? (
+                            <Link href={productHref(c.productId)} className="block max-w-[200px] truncate text-xs text-accent hover:underline">
+                              {titleOf.get(c.productId) ?? "Product"}
+                            </Link>
+                          ) : (
+                            <span className="text-xs text-warn-text">Not linked</span>
+                          )}
+                        </td>
+                        <td className="text-right tnum">{fmtMoney(c.spend, currency)}</td>
+                        <td className="text-right tnum">{fmtNumber(c.purchases)}</td>
+                        <td className="text-right tnum font-medium">{fmtMultiple(c.roas)}</td>
+                        <td className="text-right tnum">{fmtMoney(c.cpa, currency)}</td>
+                        <td className="text-right tnum text-ink-2">{fmtPercent(d?.ctr ?? 0, 2)}</td>
+                        <td className="text-right tnum text-ink-2">{fmtMoney(d?.cpc ?? 0, currency)}</td>
+                        <td className="text-right tnum text-ink-2">{fmtMoney(d?.cpm ?? 0, currency)}</td>
+                      </tr>
+                    );
+                  })}
                   {campaigns.length === 0 && (
                     <tr>
-                      <td colSpan={16} className="text-center text-ink-3">
-                        {productId ? "No campaigns are linked to this product. Clear the product filter and use “Sells product” to link them." : "No campaign data in this period"}
+                      <td colSpan={9} className="text-center text-ink-3">
+                        No ad spend in this period.
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
+            <p className="border-t border-border px-4 py-2 text-[11px] text-ink-3">
+              Purchases, ROAS and CPA here are Meta&apos;s own attribution. True ROAS above uses your real Shopify revenue.
+            </p>
           </div>
         </>
       )}

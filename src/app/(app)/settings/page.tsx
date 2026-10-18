@@ -32,7 +32,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <IntegrationCard
           source="shopify"
           title="Shopify"
@@ -76,14 +76,14 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         />
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <div className="card p-4">
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="card min-w-0 p-4">
           <h2 className="text-sm font-semibold">Store</h2>
           <div className="mt-3">
             <GeneralSettingsForm settings={{ storeName: settings.storeName, currency: settings.currency, timezone: settings.timezone }} />
           </div>
         </div>
-        <div className="card p-4">
+        <div className="card min-w-0 p-4">
           <h2 className="text-sm font-semibold">Automatic sync</h2>
           <p className="mt-1 text-xs text-ink-2">
             Data refreshes by itself: whenever someone opens the dashboard and the last sync is over an hour old, a sync runs in

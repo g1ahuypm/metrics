@@ -3,79 +3,53 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-
-  Landmark,
-  LayoutDashboard,
-  LogOut,
-  Megaphone,
-  Menu,
-  Package,
-  Receipt,
-  Settings,
-  ShoppingBag,
-  Users,
-  X,
-} from "lucide-react";
+import { LayoutDashboard, LogOut, Megaphone, Menu, Package, Receipt, Settings, ShoppingBag, Users, X } from "lucide-react";
 import { Logo } from "./Logo";
-import { ProductPicker, type ProductOption } from "./ProductPicker";
 import { logoutAction } from "@/lib/actions/auth";
 import { canEdit, ROLE_LABELS, type SessionUser } from "@/lib/auth-shared";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/profit", label: "Profit & Loss", icon: Landmark },
-  { href: "/sales", label: "Sales", icon: ShoppingBag },
+  { href: "/orders", label: "Orders", icon: ShoppingBag },
+  { href: "/products", label: "Products", icon: Package },
   { href: "/ads", label: "Meta Ads", icon: Megaphone },
-  { href: "/products", label: "Product costs", icon: Package },
-  { href: "/expenses", label: "Expenses", icon: Receipt },
+];
+
+const SETUP = [
+  { href: "/expenses", label: "Expenses & fees", icon: Receipt },
   { href: "/team", label: "Team", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings, editorOnly: true },
 ];
 
-export function AppShell({
-  user,
-  storeName,
-  products,
-  productId,
-  children,
-}: {
-  user: SessionUser;
-  storeName: string;
-  products: ProductOption[];
-  productId: string;
-  children: React.ReactNode;
-}) {
+export function AppShell({ user, storeName, children }: { user: SessionUser; storeName: string; children: React.ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const items = NAV.filter((n) => !n.editorOnly || canEdit(user.role));
+  const setup = SETUP.filter((n) => !n.editorOnly || canEdit(user.role));
+
+  const link = ({ href, label, icon: Icon }: (typeof NAV)[number]) => {
+    const active = pathname === href || pathname.startsWith(`${href}/`);
+    return (
+      <Link
+        key={href}
+        href={href}
+        onClick={() => setOpen(false)}
+        className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+          active ? "bg-accent-soft text-accent" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
+        }`}
+      >
+        <Icon className="h-4 w-4" />
+        {label}
+      </Link>
+    );
+  };
 
   const nav = (
     <nav className="flex flex-col gap-1">
-      {products.length > 0 && (
-        <div className="mb-3 px-1">
-          <ProductPicker products={products} value={productId} />
-        </div>
-      )}
-      {items.map(({ href, label, icon: Icon }) => {
-        const active = pathname === href || pathname.startsWith(`${href}/`);
-        return (
-          <Link
-            key={href}
-            href={href}
-            onClick={() => setOpen(false)}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-              active ? "bg-accent-soft text-accent" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
-            }`}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </Link>
-        );
-      })}
+      {NAV.map(link)}
+      <div className="mt-5 mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-ink-3">Setup</div>
+      {setup.map(link)}
     </nav>
   );
-
   const userBlock = (
     <div className="border-t border-border pt-4">
       <div className="px-3">

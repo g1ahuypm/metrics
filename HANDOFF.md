@@ -49,26 +49,28 @@ owner's expectations as of the last session.
 - Secrets the owner has pasted in chat before: two Shopify client secrets (shpss_…),
   partial Neon password in a screenshot. Advise rotation when convenient.
 
-## What exists (pages)
+## What exists (pages) — layout rebuilt around the owner's workflow
 
-- Sidebar: **Viewing** product selector (global, stored in cookie `pd_product`), then
-  Dashboard, Profit & Loss, Sales, Meta Ads, Product costs, Expenses, Team, Settings.
-  Date range is also global (cookie `pd_range`). URL params override cookies.
-- Dashboard: 4 tiles (net profit, revenue, orders, ad spend), daily chart, per-order
-  strip, compact P&L. Profit & Loss: statement, ratios, cost chart, daily ledger, CSV.
-  Sales: KPIs, products table, recent orders (with "Ships to" country).
-  Meta Ads: KPIs, charts, campaign table with a **"Sells product"** dropdown per
-  campaign (editors only) + "Auto-link by name". Product view uses only linked campaigns.
-- Product costs: per product, country tabs (US/CA/AU/UK/NZ, no default), tier rows per
-  bundle quantity (product cost, shipping, total, per unit), per-variant overrides,
-  "No cost (digital or bonus)". Saving re-prices affected orders immediately. Free-gift products (always $0 in orders) are
-  flagged; their cost is charged to the paid product in the same order.
-- Expenses: custom costs (monthly/daily/one-time/% revenue/per order) + per-order
-  assumptions (payment fee %, fixed fee, Shopify platform fee %, shipping, handling,
-  fallback COGS %).
-- Team: owner/admin/partner (read-only) roles, one-time invite links.
-- Settings: Shopify (client credentials, Sync now, **Full resync (60 days)**), Meta
-  (ad account ID + token), store name/currency/timezone, sync log, password.
+- Sidebar: **Dashboard, Orders, Products, Meta Ads**, then "Setup": Expenses & fees, Team,
+  Settings. No global product selector any more (cookie `pd_product` removed); the date range
+  is still global (cookie `pd_range`). /profit redirects to /dashboard, /sales to /orders.
+- Dashboard (whole store) and every product page share `ProfitOverview`: 4 numbers (Revenue,
+  Ad spend with true ROAS + CPA, Net profit, Margin), a simple profit statement (Revenue →
+  product cost → shipping → fees → profit before ads → Meta ads → expenses → net profit),
+  chart and a day-by-day table.
+- Orders: every Shopify order in the range with revenue, product cost, shipping, fees, profit.
+- Products: list of products that earned money (or had linked ad spend) with the exact
+  numbers of their product page, plus spend from unlinked campaigns; "Other products" grid
+  for the rest (free gifts, digital bonuses, products needing costs).
+- Product page `/products/<numeric Shopify id>`: switcher, ProfitOverview for that product,
+  **Bundles** (one row per bundle size × exact price paid, per-order costs, profit before
+  ads = break-even CPA), **Campaigns that sell this product** (checkboxes; the one place to
+  link campaigns, `Campaign.productId`), **Your costs** (per-country editor).
+- Meta Ads: spend, true ROAS (Shopify revenue ÷ spend), Meta ROAS, cost per order,
+  campaign table with each campaign's product (link) or "Not linked".
+- Product view math (`loadOrderSlices`): product lines exact; order-level amounts split by
+  the product's share of the order; $0 lines of other products are gifts and their cost goes
+  to the paid product; ad spend = insights of campaigns linked to the product only.
 
 ## Costing rules (src/lib/costing.ts, costbook.ts)
 
@@ -110,12 +112,15 @@ store-wide revenue; $0 lines of other products in the same order are treated as 
    from Shopify `shop.ianaTimezone` on every sync; `src/lib/dates.ts` dayStart/storeDate),
    and cancelled orders count like Shopify does (charged − refunded, no product/shipping
    cost), e.g. #LW001286 was cancelled but not refunded and Shopify counts its $66.94.
-2. **Product ↔ campaign linking is confusing.** "Sells product" is only visible on
+2. ~~**Product ↔ campaign linking is confusing.**~~ **Done:** campaigns are ticked on the
+   product page; verified that linked spend flows to product page, list and Meta Ads.
+   Was: **Product ↔ campaign linking is confusing.** "Sells product" is only visible on
    the Meta Ads campaign table when campaigns have synced; the owner could not find
    it. Required: a first-class, obvious way to link campaigns to a product (e.g. on
    the product itself, or a dedicated "Products & campaigns" setup), with clear
    state when nothing is linked, and consistent numbers across every page.
-3. **Overall feel: "disorganized, cheap, not a profit dashboard."** Rethink the
+3. ~~**Overall feel.**~~ **First pass done** (layout above, modelled on TrueProfit). Was:
+   **Overall feel: "disorganized, cheap, not a profit dashboard."** Rethink the
    information architecture around the owner's actual workflow: pick a product →
    see its P&L, its unit economics per bundle (Buy 1 / Buy 2), its linked campaigns
    and true ROAS/CPA → adjust costs → numbers update live. Fewer tiles, clearer
