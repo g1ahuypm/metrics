@@ -3,6 +3,36 @@
 Read this whole file before touching code. It is the state of the project and the
 owner's expectations as of the last session.
 
+## WHERE WE LEFT OFF (latest session, Oct 18, 2026) — read this first
+
+Done and live (each verified in a browser against real store data before deploy):
+- Costs re-price orders the moment they are saved; costs are per country (US/CA/AU/UK/NZ),
+  no default; the costs page shows costs only (owner: no selling price there).
+- Revenue matches Shopify Analytics to the cent (store timezone days; cancelled-but-not-
+  refunded orders count like Shopify). Owner confirmed live numbers after Full resync.
+- Layout rebuilt: Dashboard, Orders, Products (one page per product: P&L, bundles at exact
+  prices, campaign tick-boxes, cost editor), Meta Ads, Setup. Owner: "everything is solid".
+- Support inbox (Gmail + Claude replies, auto-send behind a safety gate, knowledge base,
+  Support role) built and live. Gmail app password is connected (confirmed: the scheduled
+  check logs in and returns "0 new emails"). GitHub Actions check every 5 min is green after
+  the CRON_SECRET fix (secrets are now whitespace-trimmed).
+
+Still open, in order:
+1. Owner to add `ANTHROPIC_API_KEY` in Vercel and Redeploy (until then mail arrives but is not
+   sorted or answered; Support shows a yellow warning). Not confirmed yet.
+2. Owner to fill knowledge-base topic "Questions about a book" (facts) and review "The offer".
+3. First real test: owner emails "where is my order?" from another address; review the real
+   AI reply quality (only a stand-in for the Messages API was tested so far).
+4. Owner said he will fix the shop policies (misspelled learnwelllsupport@ address and
+   mailto links pointing to support@learnwell.com).
+5. Optional ideas offered: break-even ROAS line on product page, negative-day alerts.
+6. Advise rotating secrets pasted in earlier chats (Shopify client secrets, Neon password).
+
+Working conventions: develop on branch `claude/determined-dirac-uw8e9m`; deploy by fast-
+forwarding `claude/ecommerce-metrics-dashboard-ujpiqd` (owner approved deploying tested work).
+Local testing used Postgres 16, real orders pulled read-only via the Shopify connector, a
+local Dovecot IMAP + SMTP capture server for Support, and Playwright at 1360px and 390px.
+
 ## Who and what
 
 - Owner: Huy (JP), CEO of **LearnWell Co**, a Shopify store (`rtnvmy-5d.myshopify.com`,
