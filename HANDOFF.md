@@ -1,0 +1,121 @@
+# ProfitDeck — handoff for continuing work
+
+Read this whole file before touching code. It is the state of the project and the
+owner's expectations as of the last session.
+
+## Who and what
+
+- Owner: Huy (JP), CEO of **LearnWell Co**, a Shopify store (`rtnvmy-5d.myshopify.com`,
+  custom domain trylearnwell.com, USD, timezone America/New_York, Basic plan).
+  Non-technical. Wants a profit dashboard that replaces TrueProfit for himself and
+  read-only partners. Communicates bluntly; wants it to *feel* like a real profit tool,
+  not a pile of features. "Clean, organized, user-friendly" are his words.
+- Store: ~59 products (physical books plus many $0 "(Digital)" bonus items),
+  ~250 orders total, ~80 in the last 60 days. Sells to US, CA, AU, UK, NZ.
+- The product he cares about right now: **Winnie the Pooh: The Complete Stories and Poems**
+  (variant gid://shopify/ProductVariant/67182817607755, list $84.99) with the free gift
+  **The Hundred Acre Wood Puzzle Packet** (list $19.99, always 100% discounted).
+
+## The offer, from real orders (verified via Shopify API)
+
+- **Buy 1:** list $84.99, automatic discount "Buy 1" $25 → customer pays **$59.99**.
+- **Buy 2:** two books $169.98, order-level automatic discount "Buy 2" ($85.03 or $75.03)
+  → customer pays **$84.95 or $94.95**, plus the puzzle packet at 100% off.
+- Shipping charged is $0 or $6.95. Tax is $0. Shopify Payments fee appears on the
+  SALE transaction (e.g. $3.21 on a $59.99 order).
+- Shopify's `LineItem.discountedTotalSet` EXCLUDES order-level discounts, so the
+  correct net line price is `originalTotalSet − Σ discountAllocations`. This is
+  implemented in `src/lib/integrations/shopify.ts` (`netLine`).
+
+## Repository and deployment
+
+- GitHub: `g1ahuypm/metrics`, branch `claude/ecommerce-metrics-dashboard-ujpiqd`
+  (also the repo's default branch). Every push auto-deploys.
+- Live: **https://metrics-azure.vercel.app** (Vercel Hobby, project "metrics").
+  Database: Neon Postgres (env `DATABASE_URL`). Env also has `APP_SECRET`, `CRON_SECRET`.
+- Build = `prisma generate && prisma db push --skip-generate --accept-data-loss && next build`,
+  so schema changes apply on deploy. Vercel Hobby allows one cron per day (06:00 UTC);
+  an on-visit auto-sync (`src/lib/autosync.ts`) runs when data is over an hour old.
+- Stack: Next.js 15 App Router + server actions, TypeScript, Tailwind 4, Prisma 6 on
+  Postgres, Recharts. Local dev needs a Postgres `DATABASE_URL` (a local Postgres 16 was
+  used for testing; `npm run setup` seeds demo data; owner@example.com / password123).
+- Shopify auth: Dev Dashboard app "MetricsDeck" using the **client credentials grant**
+  (Client ID `f68d2edc1ec472cb01b734945a3572c8`; secret is stored encrypted in the app's
+  Settings — never put secrets in the repo or chat). Scopes: read_orders, read_products,
+  read_inventory, read_customers. Custom apps can read only the last 60 days of orders.
+  Admin-created custom apps (shpat_ tokens) no longer exist for new stores.
+- Meta: system-user token with `ads_read` (owner generated one in the last session;
+  whether it was pasted and synced in the live app is NOT confirmed).
+- Secrets the owner has pasted in chat before: two Shopify client secrets (shpss_…),
+  partial Neon password in a screenshot. Advise rotation when convenient.
+
+## What exists (pages)
+
+- Sidebar: **Viewing** product selector (global, stored in cookie `pd_product`), then
+  Dashboard, Profit & Loss, Sales, Meta Ads, Product costs, Expenses, Team, Settings.
+  Date range is also global (cookie `pd_range`). URL params override cookies.
+- Dashboard: 4 tiles (net profit, revenue, orders, ad spend), daily chart, per-order
+  strip, compact P&L. Profit & Loss: statement, ratios, cost chart, daily ledger, CSV.
+  Sales: KPIs, products table, recent orders (with "Ships to" country).
+  Meta Ads: KPIs, charts, campaign table with a **"Sells product"** dropdown per
+  campaign (editors only) + "Auto-link by name". Product view uses only linked campaigns.
+- Product costs: per product, country tabs (Default/US/CA/AU/UK/NZ), tier rows per
+  bundle quantity (product cost, shipping, total, per unit, **sells for** = average of
+  real orders at that quantity with an editable override, profit, margin), per-variant
+  overrides, "No cost (digital or bonus)", "Apply to past orders" (re-prices every
+  stored order with current costs). Free-gift products (always $0 in orders) are
+  flagged; their cost is charged to the paid product in the same order.
+- Expenses: custom costs (monthly/daily/one-time/% revenue/per order) + per-order
+  assumptions (payment fee %, fixed fee, Shopify platform fee %, shipping, handling,
+  fallback COGS %).
+- Team: owner/admin/partner (read-only) roles, one-time invite links.
+- Settings: Shopify (client credentials, Sync now, **Full resync (60 days)**), Meta
+  (ad account ID + token), store name/currency/timezone, sync log, password.
+
+## Costing rules (src/lib/costing.ts, costbook.ts)
+
+Tier lookup order: variant+country → product+country → variant default → product default.
+Exact quantity match, else nearest smaller tier scaled per unit. Order shipping cost =
+Σ tier shipping when any line is tier-priced, else the per-order default. Falls back to
+Shopify "cost per item", then fallback % of price. Country comes from the shipping
+address (or presentment currency when address access is denied).
+
+Product view (src/lib/metrics.ts `loadOrderSlices`): line-level amounts are exact;
+order-level amounts (tax, shipping charged, fees, refunds, handling) split by the
+product's share of the order subtotal; fixed expenses split by share of the day's
+store-wide revenue; $0 lines of other products in the same order are treated as gifts.
+
+## OPEN PROBLEMS — the owner's current complaints, in priority order
+
+1. **Edits don't recalculate.** He edited product costs and selling prices and the
+   numbers did not change. Root causes: (a) costs apply to orders only when
+   "Apply to past orders" is clicked or on the next sync; (b) "sells for" overrides
+   only affect the margin preview on the Product costs page, not the P&L (P&L uses
+   what customers actually paid, which is correct, but this was not explained and
+   feels broken). Required: saving costs must immediately re-price affected orders
+   (no separate button), with clear feedback; selling-price override semantics must
+   be decided and made obvious (either drop it or make it clearly "planning only").
+2. **Product ↔ campaign linking is confusing.** "Sells product" is only visible on
+   the Meta Ads campaign table when campaigns have synced; the owner could not find
+   it. Required: a first-class, obvious way to link campaigns to a product (e.g. on
+   the product itself, or a dedicated "Products & campaigns" setup), with clear
+   state when nothing is linked, and consistent numbers across every page.
+3. **Overall feel: "disorganized, cheap, not a profit dashboard."** Rethink the
+   information architecture around the owner's actual workflow: pick a product →
+   see its P&L, its unit economics per bundle (Buy 1 / Buy 2), its linked campaigns
+   and true ROAS/CPA → adjust costs → numbers update live. Fewer tiles, clearer
+   hierarchy, consistent terminology (Revenue = what customers paid), no demo-data
+   banner on a connected store, nothing that needs explaining.
+4. The Meta connection on the live app may not be finished; confirm in Settings.
+5. After the net-price fix the owner must run **Full resync (60 days)** once and
+   then re-price orders; confirm the live numbers afterwards against Shopify
+   (e.g. order #LW001289 should show the book line at $84.95, not $169.98).
+
+## Working rules that were followed
+
+- Verify against real data: the claude.ai Shopify connector (read-only GraphQL) was
+  used to inspect products/orders; validate every GraphQL query before shipping.
+- Every push was verified locally: typecheck, `next build`, seed, Playwright run of
+  every page at several widths, P&L ledger == CSV totals to the cent, re-price checks.
+- Commit messages describe the change; never commit `.env`, tokens, or `dev.db`.
+- Speak plainly to the owner, step by step, no jargon; one task at a time.
