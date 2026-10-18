@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { runAllSyncs } from "@/lib/sync";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;

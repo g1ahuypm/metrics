@@ -1,13 +1,11 @@
-// ProfitDeck data model.
-// Default provider is SQLite for zero-config local use. Switch to "postgresql"
-// (and set DATABASE_URL) for production deployments.
+// ProfitDeck data model. Postgres (Neon, Supabase, Railway, or any Postgres 14+).
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

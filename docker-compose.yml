@@ -1,14 +1,25 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: profitdeck
+      POSTGRES_USER: profitdeck
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-profitdeck}
+    volumes:
+      - profitdeck-db:/var/lib/postgresql/data
+    restart: unless-stopped
+
   profitdeck:
     build: .
     ports:
       - "3000:3000"
+    depends_on:
+      - db
     environment:
+      DATABASE_URL: postgresql://profitdeck:${POSTGRES_PASSWORD:-profitdeck}@db:5432/profitdeck
       APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
       CRON_SECRET: ${CRON_SECRET:?set CRON_SECRET in .env}
       APP_URL: ${APP_URL:-http://localhost:3000}
-    volumes:
-      - profitdeck-data:/data
     restart: unless-stopped
 
   # Triggers the Shopify + Meta sync every hour.
@@ -22,4 +33,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  profitdeck-data:
+  profitdeck-db:

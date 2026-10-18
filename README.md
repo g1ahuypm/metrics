@@ -14,15 +14,44 @@ A self-hosted profit dashboard for Shopify stores running Meta ads. It replaces 
 
 ## Stack
 
-Next.js 15 (App Router, server actions), TypeScript, Tailwind CSS 4, Prisma 6 (SQLite by default, Postgres for production), Recharts.
+Next.js 15 (App Router, server actions), TypeScript, Tailwind CSS 4, Prisma 6 on Postgres, Recharts.
 
-## Quick start
+## Put it online (recommended)
+
+Two free accounts, no installs. About 15 minutes.
+
+**1. Database (Neon)**
+1. Sign up at [neon.tech](https://neon.tech) and create a project (any name, nearest region).
+2. On the project dashboard click **Connect**, untick *Connection pooling*, and copy the connection string. It looks like `postgresql://…neon.tech/neondb?sslmode=require`.
+
+**2. Hosting (Vercel)**
+1. Sign up at [vercel.com](https://vercel.com) with your GitHub account and click **Add New → Project**.
+2. Import the `metrics` repository. Leave the framework as Next.js and the root directory as is.
+3. Open **Environment Variables** and add:
+
+   | Name | Value |
+   |---|---|
+   | `DATABASE_URL` | the Neon connection string |
+   | `APP_SECRET` | a long random string (for example, mash the keyboard for 40 characters) |
+   | `CRON_SECRET` | another random string |
+
+4. Click **Deploy**. The build creates the database tables automatically.
+5. Open the URL Vercel gives you (something like `metrics-xyz.vercel.app`). The first visit asks you to create the owner account.
+
+Then connect Shopify in Settings, enter product costs, and invite partners from the Team page. The link works for anyone you invite.
+
+**Keeping data fresh.** Every time someone opens the dashboard and the data is more than an hour old, a sync runs in the background. A daily scheduled sync at 06:00 UTC runs as well (Vercel's free plan allows one scheduled run per day).
+
+**Custom domain.** Vercel → project → Settings → Domains lets you use something like `profit.yourbrand.com`.
+
+## Run on your own computer
+
+Needs Node.js 22 and a Postgres connection string (a free Neon database works here too).
 
 ```bash
-cp .env.example .env
-# set APP_SECRET and CRON_SECRET to random strings (openssl rand -base64 32)
+cp .env.example .env     # set DATABASE_URL, APP_SECRET, CRON_SECRET
 npm install
-npm run setup      # generates the Prisma client, creates the DB, seeds the owner + demo data
+npm run setup            # creates tables and seeds the owner + demo data
 npm run dev
 ```
 
@@ -34,7 +63,7 @@ Open http://localhost:3000 and sign in with the seeded owner:
 | mediabuyer@example.com | password123 | Admin |
 | partner@example.com | password123 | Partner (read-only) |
 
-Change these in `.env` (`SEED_OWNER_*`) before seeding, or set `SEED_DEMO_DATA=false` to seed only the owner account. If you skip seeding entirely, the first visit to the app asks you to create the owner account.
+Change these in `.env` (`SEED_OWNER_*`) before seeding, or set `SEED_DEMO_DATA=false` to seed only the owner account.
 
 ## What you need
 
@@ -42,9 +71,9 @@ Nothing beyond this repository and Node.js 22 to run it locally. To put it onlin
 
 | Need | Free or cheap options |
 |---|---|
-| Hosting | [Vercel](https://vercel.com) (zero-config for Next.js, hourly cron included), [Railway](https://railway.app), [Render](https://render.com), or any VPS with Docker |
-| Database | SQLite (built in, fine for one store) or Postgres on [Neon](https://neon.tech) / [Supabase](https://supabase.com) for Vercel-style hosts that have no persistent disk |
-| Hourly sync trigger | Vercel Cron (already configured), the `sync` service in `docker-compose.yml`, or a free ping service such as cron-job.org |
+| Hosting | [Vercel](https://vercel.com) free plan (zero-config for Next.js), or any VPS with Docker |
+| Database | Postgres on [Neon](https://neon.tech) free plan, or the Postgres container in `docker-compose.yml` |
+| Keeping data fresh | Automatic: a background sync runs on page visits when data is over an hour old, plus a daily scheduled sync on Vercel or an hourly one in Docker |
 | Shopify | A free app in your Dev Dashboard (dev.shopify.com), installed only on your own store |
 | Meta | A system-user token from Business Settings |
 
@@ -92,7 +121,7 @@ Secrets are stored in the database encrypted with `APP_SECRET`. Click **Sync now
 curl -H "Authorization: Bearer $CRON_SECRET" https://your-domain/api/cron/sync
 ```
 
-`vercel.json` already schedules this hourly on Vercel. On any other host, add a cron job or an uptime monitor that hits the URL.
+`vercel.json` schedules this daily on Vercel (the free plan's limit); the on-visit auto-sync keeps data fresher than that in practice. On any other host, add a cron job or an uptime monitor that hits the URL.
 
 ## How profit is calculated
 
@@ -124,23 +153,14 @@ All daily bucketing uses UTC calendar days so Shopify orders and Meta daily insi
 | Admin | Edit costs, settings and integrations; invite partners |
 | Partner | View every report and cost; cannot change anything |
 
-## Deploying
-
-**Docker (any VPS)**
+## Self-host with Docker
 
 ```bash
-cp .env.example .env   # set APP_SECRET, CRON_SECRET, APP_URL
+cp .env.example .env   # set APP_SECRET, CRON_SECRET, APP_URL (DATABASE_URL is set by compose)
 docker compose up -d --build
 ```
 
-The database is a SQLite file on the `profitdeck-data` volume and the `sync` service triggers the hourly sync. Put a reverse proxy with HTTPS (Caddy, Nginx, Cloudflare Tunnel) in front of port 3000.
-
-**Vercel + Postgres**
-
-1. Create a Postgres database (Neon or Supabase) and copy its connection string.
-2. In `prisma/schema.prisma` change `provider = "sqlite"` to `provider = "postgresql"`, commit, and run `npx prisma db push` once against that database.
-3. Import the repository in Vercel and set `DATABASE_URL`, `APP_SECRET`, `CRON_SECRET` and `APP_URL`. Vercel Cron picks up `vercel.json` and calls the sync hourly.
-4. Open the deployed URL, create the owner account, connect Shopify and Meta, and sync.
+This starts Postgres, the dashboard on port 3000, and an hourly sync. Put a reverse proxy with HTTPS (Caddy, Nginx, Cloudflare Tunnel) in front.
 
 ## Scripts
 
