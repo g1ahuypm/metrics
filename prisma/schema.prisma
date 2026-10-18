@@ -107,19 +107,22 @@ model ProductVariant {
   lineItems    OrderLineItem[]
 }
 
-// Supplier cost per bundle quantity. Product-level tiers (variantId = "")
-// apply to every variant of the product; variant-level tiers override them.
-// productCost and shippingCost are the TOTAL for `quantity` units, not per unit.
+// Supplier cost per bundle quantity, per destination country.
+// Product-level tiers (variantId = "") apply to every variant of the product;
+// variant-level tiers override them. country = "" is the default used for any
+// country without its own tiers. productCost and shippingCost are the TOTAL
+// for `quantity` units, not per unit.
 model CostTier {
   id           String   @id @default(cuid())
   productId    String                     // ProductVariant.productId (Shopify product gid)
   variantId    String   @default("")      // "" = applies to all variants of the product
+  country      String   @default("")      // ISO 3166-1 alpha-2 (US, CA, AU, GB, NZ); "" = default
   quantity     Int
   productCost  Float    @default(0)
   shippingCost Float    @default(0)
   updatedAt    DateTime @updatedAt
 
-  @@unique([productId, variantId, quantity])
+  @@unique([productId, variantId, country, quantity])
   @@index([productId])
 }
 
@@ -150,6 +153,8 @@ model Order {
 
   customerId      String?
   customerEmail   String?
+  country         String?                 // shipping country (ISO alpha-2)
+  presentmentCurrency String?             // currency the customer paid in
   isNewCustomer   Boolean   @default(false)
   itemCount       Int       @default(0)
   source          String?                 // e.g. web, pos

@@ -12,16 +12,21 @@ export default async function ProductsPage() {
     getSettingsRow(),
     db.productVariant.findMany({ orderBy: [{ productTitle: "asc" }, { variantTitle: "asc" }] }),
     db.costTier.findMany({ orderBy: { quantity: "asc" } }),
-    db.orderLineItem.groupBy({ by: ["variantId", "quantity"], _sum: { quantity: true }, where: { variantId: { not: null } } }),
+    db.orderLineItem.findMany({
+      where: { variantId: { not: null }, order: { cancelledAt: null } },
+      select: { variantId: true, quantity: true, order: { select: { country: true } } },
+    }),
   ]);
 
-  // Units sold per variant, and which bundle quantities customers actually buy.
-  const soldByVariant = new Map<string, { units: number; quantities: Set<number> }>();
+  // Units sold per variant, which bundle quantities customers buy, and where orders ship.
+  const soldByVariant = new Map<string, { units: number; quantities: Set<number>; countries: Record<string, number> }>();
   for (const s of sold) {
     if (!s.variantId) continue;
-    const row = soldByVariant.get(s.variantId) ?? { units: 0, quantities: new Set<number>() };
-    row.units += s._sum.quantity ?? 0;
+    const row = soldByVariant.get(s.variantId) ?? { units: 0, quantities: new Set<number>(), countries: {} };
+    row.units += s.quantity;
     row.quantities.add(s.quantity);
+    const c = s.order.country ?? "";
+    row.countries[c] = (row.countries[c] ?? 0) + s.quantity;
     soldByVariant.set(s.variantId, row);
   }
 
@@ -30,7 +35,7 @@ export default async function ProductsPage() {
     const productId = v.productId ?? `variant:${v.shopifyId}`;
     let p = products.get(productId);
     if (!p) {
-      p = { productId, title: v.productTitle, imageUrl: v.imageUrl, tiers: [], variants: [] };
+      p = { productId, title: v.productTitle, imageUrl: v.imageUrl, tiers: {}, unitsByCountry: {}, variants: [] };
       products.set(productId, p);
     }
     const s = soldByVariant.get(v.id);
@@ -43,16 +48,19 @@ export default async function ProductsPage() {
       shopifyUnitCost: v.unitCost,
       unitsSold: s?.units ?? 0,
       quantitiesBought: s ? [...s.quantities].sort((a, b) => a - b) : [],
-      tiers: [],
+      tiers: {},
     });
+    for (const [c, n] of Object.entries(s?.countries ?? {})) p.unitsByCountry[c] = (p.unitsByCountry[c] ?? 0) + n;
   }
   for (const t of tiers) {
     const p = products.get(t.productId);
     if (!p) continue;
     const tier = { quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost };
-    if (t.variantId === "") p.tiers.push(tier);
-    else p.variants.find((v) => v.shopifyId === t.variantId)?.tiers.push(tier);
+    const target = t.variantId === "" ? p.tiers : p.variants.find((v) => v.shopifyId === t.variantId)?.tiers;
+    if (!target) continue;
+    (target[t.country] ??= []).push(tier);
   }
+  const hasTiers = (p: ProductCostData) => Object.values(p.tiers).some((t) => t.length > 0);
   const list = [...products.values()].sort((a, b) => {
     const au = a.variants.reduce((s, v) => s + v.unitsSold, 0);
     const bu = b.variants.reduce((s, v) => s + v.unitsSold, 0);

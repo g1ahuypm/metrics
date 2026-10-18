@@ -8,7 +8,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { costOrder, type CostBook, type Tier } from "../src/lib/costing";
+import { costOrder, tierKey, type CostBook, type Tier } from "../src/lib/costing";
 
 const db = new PrismaClient();
 
@@ -30,13 +30,25 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // Supplier costs per bundle: [quantity, product cost total, shipping total]
 const PRODUCTS = [
-  { product: "Everyday Hoodie", variants: ["Black / M", "Black / L", "Sand / M", "Sand / L"], price: 68, weight: 5, tiers: [[1, 16.4, 4.6], [2, 32.8, 6.2], [3, 49.2, 7.5]] },
+  { product: "Everyday Hoodie", variants: ["Black / M", "Black / L", "Sand / M", "Sand / L"], price: 68, weight: 5, tiers: [[1, 16.4, 4.6], [2, 32.8, 6.2], [3, 49.2, 7.5]], countries: { CA: [[1, 16.4, 7.9], [2, 32.8, 10.4]], AU: [[1, 17.1, 9.8], [2, 34.2, 13.5]], GB: [[1, 16.9, 8.4], [2, 33.8, 11.1]], NZ: [[1, 17.1, 11.2]] } },
   { product: "Trail Cap", variants: ["One size"], price: 32, weight: 4, tiers: [[1, 4.9, 2.6], [2, 9.8, 3.4]] },
   { product: "Merino Crew Socks (3-pack)", variants: ["Mixed"], price: 42, weight: 4, tiers: [[1, 9.8, 3.2], [2, 19.6, 4.1]] },
   { product: "Insulated Bottle 750ml", variants: ["Steel", "Forest"], price: 45, weight: 3, tiers: [[1, 8.7, 3.8], [2, 17.4, 5.3]] },
-  { product: "Weekender Bag", variants: ["Olive", "Charcoal"], price: 149, weight: 1.5, tiers: [[1, 41.5, 10.5], [2, 83, 14]] },
+  { product: "Weekender Bag", variants: ["Olive", "Charcoal"], price: 149, weight: 1.5, tiers: [[1, 41.5, 10.5], [2, 83, 14]], countries: { AU: [[1, 41.5, 19.9]], GB: [[1, 41.5, 16.4]] } },
   { product: "Wool Beanie", variants: ["Oat", "Navy"], price: 29, weight: 2.5, tiers: [[1, 4.3, 2.5], [2, 8.6, 3.1], [3, 12.9, 3.6]] },
 ];
+
+// Where orders ship: weights for the "big five" markets
+const COUNTRIES: [string, number][] = [["US", 62], ["CA", 14], ["AU", 11], ["GB", 8], ["NZ", 5]];
+const pickCountry = () => {
+  let r = rand() * 100;
+  for (const [c, w] of COUNTRIES) {
+    r -= w;
+    if (r <= 0) return c;
+  }
+  return "US";
+};
+const CURRENCY: Record<string, string> = { US: "USD", CA: "CAD", AU: "AUD", GB: "GBP", NZ: "NZD" };
 
 const CAMPAIGNS = [
   { name: "[PROSPECTING] Broad – Hoodie UGC", objective: "OUTCOME_SALES", status: "ACTIVE", budget: 250, base: 240, roas: 2.6 },
@@ -89,8 +101,14 @@ async function seedDemoData() {
   for (const p of PRODUCTS) {
     const productId = `gid://shopify/Product/${100 + PRODUCTS.indexOf(p)}`;
     const tiers: Tier[] = p.tiers.map(([quantity, productCost, shippingCost]) => ({ quantity, productCost, shippingCost }));
-    for (const t of tiers) await db.costTier.create({ data: { productId, variantId: "", ...t } });
-    book.tiers.set(productId, new Map([["", tiers]]));
+    const byKey = new Map<string, Tier[]>([[tierKey("", ""), tiers]]);
+    for (const t of tiers) await db.costTier.create({ data: { productId, variantId: "", country: "", ...t } });
+    for (const [country, rows] of Object.entries((p as { countries?: Record<string, number[][]> }).countries ?? {})) {
+      const ct: Tier[] = rows.map(([quantity, productCost, shippingCost]) => ({ quantity, productCost, shippingCost }));
+      for (const t of ct) await db.costTier.create({ data: { productId, variantId: "", country, ...t } });
+      byKey.set(tierKey("", country), ct);
+    }
+    book.tiers.set(productId, byKey);
     for (const vt of p.variants) {
       const sku = `${p.product.split(" ").map((w) => w[0]).join("").toUpperCase()}-${vt.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6)}`;
       const shopifyId = `gid://shopify/ProductVariant/${1000 + variants.length}`;
@@ -185,7 +203,8 @@ async function seedDemoData() {
         const discount = promo > 1 ? 0.8 : rand() < 0.15 ? 0.9 : 1;
         lines.push({ variantId: v.id, shopifyId: v.shopifyId, title: v.title, sku: v.sku, quantity: qty, price: round2(v.price * qty * discount), listPrice: round2(v.price * qty) });
       }
-      const costed = costOrder(book, lines.map((l) => ({ variantShopifyId: l.shopifyId, quantity: l.quantity, price: l.price })), 6.5);
+      const country = pickCountry();
+      const costed = costOrder(book, lines.map((l) => ({ variantShopifyId: l.shopifyId, quantity: l.quantity, price: l.price })), 6.5, country);
       const subtotal = round2(lines.reduce((s, l) => s + l.price, 0));
       const listTotal = lines.reduce((s, l) => s + l.quantity, 0);
       const shippingCharged = subtotal >= 75 ? 0 : 6.95;
@@ -219,6 +238,8 @@ async function seedDemoData() {
           platformFees: 0,
           customerId,
           customerEmail: `customer${customerId.split("/").pop()}@example.com`,
+          country,
+          presentmentCurrency: CURRENCY[country],
           isNewCustomer: !returning,
           itemCount: listTotal,
           source: rand() < 0.9 ? "web" : "shopify_draft_order",

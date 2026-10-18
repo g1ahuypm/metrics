@@ -12,7 +12,7 @@ export type LineCost = {
 };
 
 export type CostBook = {
-  /** key: productId → variantId ("" for product-level) → tiers sorted by quantity */
+  /** key: productId → `${variantId}|${country}` ("" for product-level / default) → tiers sorted by quantity */
   tiers: Map<string, Map<string, Tier[]>>;
   /** key: variant shopifyId → Shopify "cost per item" */
   shopifyUnitCost: Map<string, number>;
@@ -44,15 +44,28 @@ export function resolveTier(tiers: Tier[], quantity: number): { productCost: num
   return { productCost: round2(base.productCost * factor), shippingCost: round2(base.shippingCost * factor) };
 }
 
-export function tiersFor(book: CostBook, productId: string | null, variantShopifyId: string | null): Tier[] {
+export const tierKey = (variantId: string, country: string) => `${variantId}|${country}`;
+
+/**
+ * Picks the tier list for a line, most specific first:
+ * variant+country → product+country → variant default → product default.
+ */
+export function tiersFor(book: CostBook, productId: string | null, variantShopifyId: string | null, country: string | null): Tier[] {
   if (!productId) return [];
-  const byVariant = book.tiers.get(productId);
-  if (!byVariant) return [];
-  if (variantShopifyId) {
-    const v = byVariant.get(variantShopifyId);
-    if (v?.length) return v;
+  const byKey = book.tiers.get(productId);
+  if (!byKey) return [];
+  const candidates: string[] = [];
+  if (country) {
+    if (variantShopifyId) candidates.push(tierKey(variantShopifyId, country));
+    candidates.push(tierKey("", country));
   }
-  return byVariant.get("") ?? [];
+  if (variantShopifyId) candidates.push(tierKey(variantShopifyId, ""));
+  candidates.push(tierKey("", ""));
+  for (const k of candidates) {
+    const t = byKey.get(k);
+    if (t?.length) return t;
+  }
+  return [];
 }
 
 export function resolveLineCost(
@@ -60,9 +73,10 @@ export function resolveLineCost(
   variantShopifyId: string | null,
   quantity: number,
   linePrice: number,
+  country: string | null = null,
 ): LineCost {
   const productId = variantShopifyId ? (book.productOf.get(variantShopifyId) ?? null) : null;
-  const tiers = tiersFor(book, productId, variantShopifyId);
+  const tiers = tiersFor(book, productId, variantShopifyId, country);
   const tier = resolveTier(tiers, quantity);
   if (tier) return { productCost: tier.productCost, shippingCost: tier.shippingCost, source: "tier" };
 
@@ -89,9 +103,9 @@ export type OrderCostResult = {
  * Costs a whole order. Order-level shipping is the sum of the tier shipping when
  * any line is tier-priced; otherwise the per-order default shipping applies.
  */
-export function costOrder(book: CostBook, lines: OrderCostInput[], defaultShippingCost: number): OrderCostResult {
+export function costOrder(book: CostBook, lines: OrderCostInput[], defaultShippingCost: number, country: string | null = null): OrderCostResult {
   const costed = lines.map((l) => {
-    const c = resolveLineCost(book, l.variantShopifyId, l.quantity, l.price);
+    const c = resolveLineCost(book, l.variantShopifyId, l.quantity, l.price, country);
     return { ...c, unitCost: l.quantity > 0 ? round2(c.productCost / l.quantity) : 0 };
   });
   const anyTier = costed.some((c) => c.source === "tier");

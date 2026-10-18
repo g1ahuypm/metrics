@@ -2,6 +2,7 @@ import "server-only";
 import { subDays } from "date-fns";
 import { db } from "../db";
 import { costOrder } from "../costing";
+import { countryFromCurrency } from "../constants";
 import { loadCostBook } from "../costbook";
 import { decrypt, encrypt } from "../crypto";
 import type { IntegrationConfig, ShopifyAuth } from "./config";
@@ -28,6 +29,8 @@ type ShopifyOrder = {
   totalShippingPriceSet: Money;
   totalRefundedSet: Money;
   customer: { id: string } | null;
+  shippingAddress: { countryCodeV2: string | null } | null;
+  presentmentCurrencyCode: string;
   lineItems: {
     nodes: {
       id: string;
@@ -188,7 +191,7 @@ query Orders($cursor: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id name createdAt processedAt cancelledAt
-      displayFinancialStatus displayFulfillmentStatus currencyCode sourceName tags
+      displayFinancialStatus displayFulfillmentStatus currencyCode presentmentCurrencyCode sourceName tags
       currentSubtotalPriceSet { shopMoney { amount } }
       currentTotalPriceSet { shopMoney { amount } }
       currentTotalTaxSet { shopMoney { amount } }
@@ -257,17 +260,19 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
   let cursor: string | null = null;
   let count = 0;
   const query = `updated_at:>='${since.toISOString()}'`;
-  // The customer field needs the app's "protected customer data" access to be
-  // configured. When it is not, sync everything else and skip new-vs-returning.
+  // Customer and shipping address are protected customer data. If the app has
+  // no access to them, sync everything else; country then comes from the
+  // currency the customer paid in.
   let withCustomer = true;
+  const PII = "customer { id } shippingAddress { countryCodeV2 }";
 
   do {
     type Page = { orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ShopifyOrder[] } };
     let data: Page;
     try {
-      data = await shopifyGraphQL<Page>(cfg.shopify, ORDERS_QUERY.replace("__CUSTOMER__", withCustomer ? "customer { id }" : ""), { cursor, query });
+      data = await shopifyGraphQL<Page>(cfg.shopify, ORDERS_QUERY.replace("__CUSTOMER__", withCustomer ? PII : ""), { cursor, query });
     } catch (err) {
-      if (withCustomer && err instanceof ShopifyGraphQLError && /customer|protected/i.test(err.message)) {
+      if (withCustomer && err instanceof ShopifyGraphQLError && /customer|protected|address/i.test(err.message)) {
         withCustomer = false;
         data = await shopifyGraphQL<Page>(cfg.shopify, ORDERS_QUERY.replace("__CUSTOMER__", ""), { cursor, query });
       } else throw err;
@@ -282,6 +287,7 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
           book.shopifyUnitCost.set(li.variant.id, Number(li.variant.inventoryItem.unitCost.amount));
         }
       }
+      const country = o.shippingAddress?.countryCodeV2 ?? countryFromCurrency(o.presentmentCurrencyCode) ?? null;
       const costed = costOrder(
         book,
         o.lineItems.nodes.map((li) => ({
@@ -290,6 +296,7 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
           price: num(li.discountedTotalSet),
         })),
         cfg.defaultShippingCost,
+        country,
       );
       const lineItems = o.lineItems.nodes.map((li, i) => ({
         shopifyId: li.id,
@@ -336,6 +343,8 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
         platformFees,
         customerId: o.customer?.id ?? null,
         customerEmail: null,
+        country,
+        presentmentCurrency: o.presentmentCurrencyCode,
         itemCount,
         source: o.sourceName,
         tags: o.tags.join(", "),

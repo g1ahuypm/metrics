@@ -43,3 +43,23 @@ export const TIMEZONES = [
   "Asia/Tokyo",
   "Australia/Sydney",
 ];
+
+/** Destination markets with their own supplier costs. "" is the default for everywhere else. */
+export const MARKETS: { code: string; label: string; short: string; currency: string }[] = [
+  { code: "US", label: "United States", short: "US", currency: "USD" },
+  { code: "CA", label: "Canada", short: "CA", currency: "CAD" },
+  { code: "AU", label: "Australia", short: "AU", currency: "AUD" },
+  { code: "GB", label: "United Kingdom", short: "UK", currency: "GBP" },
+  { code: "NZ", label: "New Zealand", short: "NZ", currency: "NZD" },
+];
+
+export function marketLabel(code: string | null | undefined): string {
+  if (!code) return "Default";
+  return MARKETS.find((m) => m.code === code)?.short ?? code;
+}
+
+/** Best-effort country from the currency the customer paid in, when no address is available. */
+export function countryFromCurrency(currency: string | null | undefined): string | null {
+  if (!currency) return null;
+  return MARKETS.find((m) => m.currency === currency.toUpperCase())?.code ?? null;
+}

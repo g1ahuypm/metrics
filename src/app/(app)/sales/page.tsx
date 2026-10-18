@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { resolveRange } from "@/lib/dates";
 import { fmtDate, fmtMoney, fmtNumber, fmtPercent } from "@/lib/format";
+import { marketLabel } from "@/lib/constants";
 import { getDataStatus, getMetrics, getProductBreakdown, getRecentOrders } from "@/lib/metrics";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
@@ -133,6 +134,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
                     <th>Order</th>
                     <th>Date</th>
                     <th>Customer</th>
+                    <th>Ships to</th>
                     <th>Items</th>
                     <th className="text-right">Total</th>
                     <th className="text-right">Refunded</th>
@@ -156,6 +158,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
                           </div>
                           {o.isNewCustomer && <span className="badge">New</span>}
                         </td>
+                        <td className="text-ink-2">{o.country ? marketLabel(o.country) : "—"}</td>
                         <td className="text-ink-2">
                           <div className="max-w-[220px] truncate">{o.lineItems.map((li) => `${li.quantity}× ${li.title}`).join(", ")}</div>
                         </td>
@@ -173,7 +176,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
                   })}
                   {orders.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="text-center text-ink-3">No orders in this period</td>
+                      <td colSpan={12} className="text-center text-ink-3">No orders in this period</td>
                     </tr>
                   )}
                 </tbody>

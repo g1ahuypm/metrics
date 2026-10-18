@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "./db";
-import type { CostBook, Tier } from "./costing";
+import { tierKey, type CostBook, type Tier } from "./costing";
 
 /** Loads every cost tier and variant cost into memory for fast order costing. */
 export async function loadCostBook(fallbackCogsPercent: number): Promise<CostBook> {
@@ -21,9 +21,10 @@ export async function loadCostBook(fallbackCogsPercent: number): Promise<CostBoo
       byVariant = new Map<string, Tier[]>();
       book.tiers.set(t.productId, byVariant);
     }
-    const list = byVariant.get(t.variantId) ?? [];
+    const key = tierKey(t.variantId, t.country);
+    const list = byVariant.get(key) ?? [];
     list.push({ quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost });
-    byVariant.set(t.variantId, list);
+    byVariant.set(key, list);
   }
   for (const v of variants) {
     if (v.unitCost !== null) book.shopifyUnitCost.set(v.shopifyId, v.unitCost);
@@ -42,7 +43,7 @@ export async function recostAllOrders(): Promise<number> {
   const shopifyIdOf = new Map(variantsById.map((v) => [v.id, v.shopifyId]));
 
   const orders = await db.order.findMany({
-    select: { id: true, lineItems: { select: { id: true, variantId: true, quantity: true, price: true } } },
+    select: { id: true, country: true, lineItems: { select: { id: true, variantId: true, quantity: true, price: true } } },
   });
   let updated = 0;
   for (const o of orders) {
@@ -54,6 +55,7 @@ export async function recostAllOrders(): Promise<number> {
         price: li.price,
       })),
       settings?.defaultShippingCost ?? 0,
+      o.country,
     );
     await db.$transaction([
       ...o.lineItems.map((li, i) =>

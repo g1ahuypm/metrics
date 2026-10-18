@@ -25,9 +25,10 @@ const tierSchema = z
 
 export type TierInput = z.infer<typeof tierSchema>[number];
 
-/** Replaces the tiers for a product (variantId = "") or one variant. */
-export async function saveTiersAction(productId: string, variantId: string, tiers: TierInput[]): Promise<FormState> {
+/** Replaces the tiers for a product (variantId = "") or one variant, for one country ("" = default). */
+export async function saveTiersAction(productId: string, variantId: string, tiers: TierInput[], country = ""): Promise<FormState> {
   await requireEditor();
+  if (!/^[A-Z]{2}$|^$/.test(country)) return { error: "Unknown country" };
   const parsed = tierSchema.safeParse(tiers);
   if (!parsed.success) return { error: "Enter whole quantities and non-negative costs" };
   const seen = new Set<number>();
@@ -36,17 +37,17 @@ export async function saveTiersAction(productId: string, variantId: string, tier
     seen.add(t.quantity);
   }
   await db.$transaction([
-    db.costTier.deleteMany({ where: { productId, variantId } }),
-    ...parsed.data.map((t) => db.costTier.create({ data: { productId, variantId, ...t } })),
+    db.costTier.deleteMany({ where: { productId, variantId, country } }),
+    ...parsed.data.map((t) => db.costTier.create({ data: { productId, variantId, country, ...t } })),
   ]);
   revalidatePath("/", "layout");
   return { success: parsed.data.length ? "Costs saved" : "Costs cleared" };
 }
 
-/** Removes a variant's own tiers so it falls back to the product-level tiers. */
-export async function clearVariantTiersAction(productId: string, variantId: string): Promise<void> {
+/** Removes a variant's own tiers for one country (or all countries) so it falls back to the product-level tiers. */
+export async function clearVariantTiersAction(productId: string, variantId: string, country?: string): Promise<void> {
   await requireEditor();
-  await db.costTier.deleteMany({ where: { productId, variantId } });
+  await db.costTier.deleteMany({ where: { productId, variantId, ...(country === undefined ? {} : { country }) } });
   revalidatePath("/", "layout");
 }
 
