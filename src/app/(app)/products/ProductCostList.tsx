@@ -33,10 +33,26 @@ export type ProductCostData = {
   unitsByCountry: Record<string, number>;
   variants: VariantCostData[];
   soldPrices: SoldPrices;
+  soldPricesByCountry: Record<string, SoldPrices>;
   isFreeGift: boolean;
 };
 
 const hasAny = (t: TiersByCountry) => Object.values(t).some((x) => x.length > 0);
+
+/** Costs are entered per country. Tiers under "" are either "No cost" ($0 everywhere) or older all-country costs. */
+function costCoverage(p: ProductCostData) {
+  const all = p.tiers[""] ?? [];
+  const noCost = all.length > 0 && all.every((t) => t.productCost === 0 && t.shippingCost === 0);
+  const legacyAll = all.length > 0 && !noCost ? all : [];
+  const covered = (c: string) =>
+    noCost || legacyAll.length > 0 || (p.tiers[c]?.length ?? 0) > 0 || (p.variants.length > 0 && p.variants.every((v) => (v.tiers[c]?.length ?? 0) > 0));
+  const soldIn = Object.entries(p.unitsByCountry).filter(([, n]) => n > 0).map(([c]) => c);
+  const missing = soldIn.filter((c) => !covered(c)).sort((a, b) => (p.unitsByCountry[b] ?? 0) - (p.unitsByCountry[a] ?? 0));
+  const anyCountry = MARKETS.some((m) => (p.tiers[m.code]?.length ?? 0) > 0) || p.variants.some((v) => hasAny(v.tiers));
+  return { noCost, legacyAll, missing, anyCountry };
+}
+
+const countryName = (code: string) => (code ? (MARKETS.find((m) => m.code === code)?.label ?? code) : "other countries");
 
 // ---------------------------------------------------------------------------
 
@@ -44,7 +60,7 @@ export function ProductCostList({ products, currency, editor }: { products: Prod
   const [query, setQuery] = useState("");
   const [onlyMissing, setOnlyMissing] = useState(false);
 
-  const isMissing = (p: ProductCostData) => !hasAny(p.tiers) && p.variants.some((v) => !hasAny(v.tiers));
+  const isMissing = (p: ProductCostData) => costCoverage(p).missing.length > 0;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -68,8 +84,8 @@ export function ProductCostList({ products, currency, editor }: { products: Prod
             haven&apos;t listed, the nearest smaller tier is scaled per unit.
           </p>
           <p className="mt-1">
-            <strong className="text-ink">Default</strong> costs apply everywhere. Fill in a country tab (US, CA, AU, UK, NZ) when that
-            country costs something different. Each order is priced by the country it ships to.
+            Enter costs for each country you ship to. Every order is priced by the country it ships to. An{" "}
+            <span className="font-medium text-warn-text">amber</span> country has sales but no costs yet.
           </p>
           <p className="mt-1">
             Saving updates every past order with this product right away, on every page.
@@ -107,18 +123,20 @@ function CountryTabs({
   onChange,
   tiers,
   units,
+  missing,
 }: {
   value: string;
   onChange: (c: string) => void;
   tiers: TiersByCountry;
   units: Record<string, number>;
+  missing: string[];
 }) {
-  const tabs = [{ code: "", short: "Default" }, ...MARKETS.map((m) => ({ code: m.code, short: m.short }))];
+  const tabs = MARKETS.map((m) => ({ code: m.code, short: m.short }));
   return (
     <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
       {tabs.map((t) => {
         const set = (tiers[t.code]?.length ?? 0) > 0;
-        const sold = t.code === "" ? Object.entries(units).filter(([c]) => !MARKETS.some((m) => m.code === c)).reduce((s, [, n]) => s + n, 0) : (units[t.code] ?? 0);
+        const sold = units[t.code] ?? 0;
         const active = value === t.code;
         return (
           <button
@@ -128,9 +146,9 @@ function CountryTabs({
             className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
               active ? "bg-accent-soft text-accent" : "text-ink-2 hover:text-ink"
             }`}
-            title={t.code === "" ? "Used for any country without its own costs" : `${marketLabel(t.code)} · ${sold} units sold`}
+            title={`${countryName(t.code)} · ${sold} units sold · ${set ? "costs set" : missing.includes(t.code) ? "no costs yet" : "no costs of its own"}`}
           >
-            <span className={`h-1.5 w-1.5 rounded-full ${set ? "bg-good" : "bg-border-strong"}`} />
+            <span className={`h-1.5 w-1.5 rounded-full ${set ? "bg-good" : missing.includes(t.code) ? "bg-warn" : "bg-border-strong"}`} />
             {t.short}
             {sold > 0 && <span className="text-[10px] text-ink-3">{fmtNumber(sold)}</span>}
           </button>
@@ -142,22 +160,27 @@ function CountryTabs({
 
 function ProductCard({ product, currency, editor }: { product: ProductCostData; currency: string; editor: boolean }) {
   const [showVariants, setShowVariants] = useState(false);
-  const [country, setCountry] = useState("");
+  // Open on the country with the most sales.
+  const [country, setCountry] = useState(() => [...MARKETS].sort((a, b) => (product.unitsByCountry[b.code] ?? 0) - (product.unitsByCountry[a.code] ?? 0))[0].code);
+  const [pending, start] = useTransition();
+  const coverage = costCoverage(product);
   const units = product.variants.reduce((s, v) => s + v.unitsSold, 0);
   const price = product.variants[0]?.price ?? 0;
   const overrides = product.variants.filter((v) => hasAny(v.tiers)).length;
   const shopifyCost = product.variants.find((v) => v.shopifyUnitCost !== null)?.shopifyUnitCost ?? null;
   const quantitiesBought = [...new Set(product.variants.flatMap((v) => v.quantitiesBought))].sort((a, b) => a - b);
-  const countriesSet = MARKETS.filter((m) => (product.tiers[m.code]?.length ?? 0) > 0).map((m) => m.short);
-  const status =
-    hasAny(product.tiers) || overrides === product.variants.length
-      ? { label: "Costs set", tone: "text-good-text" }
-      : overrides > 0
-        ? { label: "Some variants missing", tone: "text-warn-text" }
-        : { label: "No costs yet", tone: "text-warn-text" };
+  const status = coverage.noCost
+    ? { label: "No cost", tone: "text-ink-2" }
+    : coverage.missing.length > 0
+      ? { label: `Missing costs: ${coverage.missing.map((c) => (c ? marketLabel(c) : "unknown")).join(", ")}`, tone: "text-warn-text" }
+      : coverage.anyCountry || coverage.legacyAll.length > 0
+        ? { label: "Costs set", tone: "text-good-text" }
+        : { label: "No costs yet", tone: "text-ink-3" };
 
   const currentTiers = product.tiers[country] ?? [];
-  const fallback = country !== "" && currentTiers.length === 0 ? product.tiers[""] ?? [] : [];
+  // Countries that already have costs, offered as a starting point for an empty one.
+  const copyFrom = MARKETS.filter((m) => m.code !== country && (product.tiers[m.code]?.length ?? 0) > 0).map((m) => ({ label: m.short, tiers: product.tiers[m.code] }));
+  const removeAllCountry = (tiers: TierInput[]) => start(async () => void (await saveTiersAction(product.productId, "", tiers, "")));
 
   return (
     <div className="card overflow-hidden">
@@ -187,7 +210,6 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
               )}
               <span>{product.variants.length} variant{product.variants.length === 1 ? "" : "s"}</span>
               <span>{fmtNumber(units)} units sold</span>
-              {countriesSet.length > 0 && <span>Country costs: {countriesSet.join(", ")}</span>}
               {shopifyCost !== null && <span>Shopify cost per item {fmtMoney(shopifyCost, currency)}</span>}
             </div>
             {product.isFreeGift && (
@@ -203,30 +225,53 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
         </button>
       </div>
 
-      <div className="border-t border-border px-4 py-3">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <CountryTabs value={country} onChange={setCountry} tiers={product.tiers} units={product.unitsByCountry} />
-          <span className="text-xs text-ink-3">
-            {country === "" ? "Applies to every country without its own costs" : `Orders shipping to ${marketLabel(country)}`}
-          </span>
+      {coverage.noCost ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-sm text-ink-2">
+          <span>No cost in any country (digital or bonus item).</span>
+          {editor && (
+            <button type="button" className="btn-ghost text-xs" disabled={pending} onClick={() => removeAllCountry([])}>
+              <Undo2 className="h-3.5 w-3.5" /> It has a cost
+            </button>
+          )}
         </div>
-        <TierEditor
-          key={`p-${product.productId}-${country}`}
-          productId={product.productId}
-          variantId=""
-          country={country}
-          initial={currentTiers}
-          template={fallback}
-          price={price}
-          soldPrices={product.soldPrices}
-          currency={currency}
-          editor={editor}
-          quantitiesBought={quantitiesBought}
-          heading={country === "" ? "Default supplier cost for this product" : `Supplier cost when shipping to ${marketLabel(country)}`}
-        />
-      </div>
+      ) : (
+        <div className="border-t border-border px-4 py-3">
+          {coverage.legacyAll.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn-text">
+              <span>
+                Older costs for all countries ({coverage.legacyAll.map((t) => `qty ${t.quantity}: ${fmtMoney(t.productCost + t.shippingCost, currency)}`).join(", ")}) still
+                apply wherever a country below is empty.
+              </span>
+              {editor && (
+                <button type="button" className="btn-ghost px-2 py-1 text-xs" disabled={pending} onClick={() => removeAllCountry([])}>
+                  <Trash2 className="h-3.5 w-3.5" /> Remove them
+                </button>
+              )}
+            </div>
+          )}
+          <div className="mb-3">
+            <CountryTabs value={country} onChange={setCountry} tiers={product.tiers} units={product.unitsByCountry} missing={coverage.missing} />
+          </div>
+          <TierEditor
+            key={`p-${product.productId}-${country}`}
+            productId={product.productId}
+            variantId=""
+            country={country}
+            initial={currentTiers}
+            copyFrom={copyFrom}
+            offerNoCost={!coverage.anyCountry && coverage.legacyAll.length === 0}
+            price={price}
+            soldPrices={product.soldPrices}
+            countryPrices={product.soldPricesByCountry[country] ?? {}}
+            currency={currency}
+            editor={editor}
+            quantitiesBought={quantitiesBought}
+            heading={`Supplier cost when shipping to ${countryName(country)}`}
+          />
+        </div>
+      )}
 
-      {showVariants && (
+      {showVariants && !coverage.noCost && (
         <div className="divide-y divide-border border-t border-border bg-surface-2/50">
           {product.variants.map((v) => (
             <VariantSection key={v.id} product={product} variant={v} country={country} currency={currency} editor={editor} />
@@ -254,7 +299,7 @@ function VariantSection({
   const [customizing, setCustomizing] = useState(own.length > 0);
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
-  const template = own.length ? [] : product.tiers[country] ?? product.tiers[""] ?? [];
+  const productTiers = product.tiers[country] ?? [];
   return (
     <div className="px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -266,7 +311,7 @@ function VariantSection({
         </div>
         {editor && !customizing && (
           <button type="button" className="btn-ghost text-xs" onClick={() => setCustomizing(true)}>
-            Set different {marketLabel(country)} costs for this variant
+            Set different {countryName(country)} costs for this variant
           </button>
         )}
         {editor && customizing && (
@@ -295,18 +340,20 @@ function VariantSection({
             variantId={variant.shopifyId}
             country={country}
             initial={own}
-            template={template}
+            copyFrom={productTiers.length ? [{ label: "product costs", tiers: productTiers }] : []}
+            offerNoCost={false}
             price={variant.price}
             soldPrices={product.soldPrices}
+            countryPrices={product.soldPricesByCountry[country] ?? {}}
             currency={currency}
             editor={editor}
             quantitiesBought={variant.quantitiesBought}
-            heading={`${marketLabel(country)} supplier cost for ${variant.title}`}
+            heading={`${countryName(country)} supplier cost for ${variant.title}`}
           />
         </div>
       ) : (
         <p className="mt-1 text-xs text-ink-3">
-          Uses the product costs above.{msg && <span className="ml-2 text-good-text">{msg}</span>}
+          Uses the {countryName(country)} product costs above.{msg && <span className="ml-2 text-good-text">{msg}</span>}
         </p>
       )}
     </div>
@@ -320,9 +367,11 @@ function TierEditor({
   variantId,
   country,
   initial,
-  template,
+  copyFrom,
+  offerNoCost,
   price,
   soldPrices,
+  countryPrices,
   currency,
   editor,
   quantitiesBought,
@@ -332,10 +381,14 @@ function TierEditor({
   variantId: string;
   country: string;
   initial: TierRow[];
-  /** Tiers this editor falls back to while empty (default costs); offered as a starting point. */
-  template: TierRow[];
+  /** Filled-in costs (other countries, or the product's) offered as a starting point while this one is empty. */
+  copyFrom: { label: string; tiers: TierRow[] }[];
+  /** Offer "No cost (digital or bonus)", which sets $0 for every country. */
+  offerNoCost: boolean;
   price: number;
   soldPrices: SoldPrices;
+  /** The same, only for orders shipping to this editor's country. */
+  countryPrices: SoldPrices;
   currency: string;
   editor: boolean;
   quantitiesBought: number[];
@@ -359,15 +412,20 @@ function TierEditor({
   const dirty =
     JSON.stringify(parsed) !==
     JSON.stringify(saved.map((t) => ({ quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost })));
-  /** What customers pay for a bundle of q units: the average of real orders (what the P&L uses), else list price × q. */
+  /**
+   * What customers pay for a bundle of q units: the average of real orders to this
+   * country (what the P&L uses), else of all countries, else list price × q.
+   */
   const paidFor = (q: number) => {
-    const obs = soldPrices[q];
-    if (obs && obs.count > 0) return { value: obs.avg, source: "orders" as const };
-    return { value: price * q, source: "list" as const };
+    const here = countryPrices[q];
+    if (here?.count) return { value: here.avg, note: `avg of ${here.count} ${marketLabel(country)} order${here.count === 1 ? "" : "s"}`, real: true };
+    const all = soldPrices[q];
+    if (all?.count) return { value: all.avg, note: `avg of ${all.count} order${all.count === 1 ? "" : "s"}, all countries`, real: true };
+    return { value: price * q, note: "list price · no orders yet", real: false };
   };
   const nextQty = (Math.max(0, ...parsed.map((r) => r.quantity)) || 0) + 1;
   const unlisted = quantitiesBought.filter((q) => !parsed.some((r) => r.quantity === q));
-  const usingFallback = saved.length === 0 && template.length > 0;
+  const isEmpty = saved.length === 0 && rows.every((r) => r.productCost === "" && r.shippingCost === "");
 
   function update(i: number, key: keyof (typeof rows)[number], value: string) {
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, [key]: value } : r)));
@@ -395,14 +453,15 @@ function TierEditor({
           </div>
         )}
       </div>
-      {usingFallback && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-xs text-ink-2">
-          <span>Currently using the default costs ({template.map((t) => `qty ${t.quantity}: ${fmtMoney(t.productCost + t.shippingCost, currency)}`).join(", ")}).</span>
-          {editor && (
-            <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setRows(toRows(template))}>
-              <Copy className="h-3.5 w-3.5" /> Start from default
+      {isEmpty && editor && copyFrom.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-surface-2 px-3 py-2 text-xs text-ink-2">
+          <span>Nothing entered here yet. Copy from</span>
+          {copyFrom.map((c) => (
+            <button key={c.label} type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setRows(toRows(c.tiers))}>
+              <Copy className="h-3.5 w-3.5" /> {c.label}
             </button>
-          )}
+          ))}
+          <span>then change what differs.</span>
         </div>
       )}
       <div className="overflow-x-auto">
@@ -424,6 +483,8 @@ function TierEditor({
             {rows.map((r, i) => {
               const q = Number(r.quantity) || 0;
               const total = Number(r.productCost || 0) + Number(r.shippingCost || 0);
+              // Profit means nothing until a cost is entered.
+              const entered = r.productCost !== "" || r.shippingCost !== "";
               const paid = paidFor(q);
               const sells = paid.value;
               const margin = safeDiv(sells - total, sells);
@@ -441,16 +502,14 @@ function TierEditor({
                   <td className="py-1.5 pr-3">
                     <input type="number" min="0" step="0.01" className="input w-28 py-1 text-right tnum" placeholder="0.00" value={r.shippingCost} readOnly={!editor} onChange={(e) => update(i, "shippingCost", e.target.value)} />
                   </td>
-                  <td className="py-1.5 pr-3 text-right tnum font-medium">{fmtMoney(total, currency)}</td>
-                  <td className="py-1.5 pr-3 text-right tnum text-ink-2">{q > 0 ? fmtMoney(total / q, currency) : "—"}</td>
+                  <td className="py-1.5 pr-3 text-right tnum font-medium">{entered ? fmtMoney(total, currency) : "—"}</td>
+                  <td className="py-1.5 pr-3 text-right tnum text-ink-2">{entered && q > 0 ? fmtMoney(total / q, currency) : "—"}</td>
                   <td className="py-1.5 pr-3 text-right">
-                    <div className={`tnum ${paid.source === "orders" ? "font-medium" : "text-ink-3"}`}>{fmtMoney(sells, currency)}</div>
-                    <div className="text-[10px] text-ink-3">
-                      {paid.source === "orders" ? `avg of ${soldPrices[q].count} order${soldPrices[q].count === 1 ? "" : "s"}` : "list price · no orders yet"}
-                    </div>
+                    <div className={`tnum ${paid.real ? "font-medium" : "text-ink-3"}`}>{fmtMoney(sells, currency)}</div>
+                    <div className="whitespace-nowrap text-[10px] text-ink-3">{paid.note}</div>
                   </td>
-                  <td className={`py-1.5 pr-3 text-right tnum font-medium ${sells - total < 0 ? "text-bad-text" : ""}`}>{fmtMoney(sells - total, currency)}</td>
-                  <td className={`py-1.5 pr-3 text-right tnum ${margin < 0.3 && sells > 0 ? "text-warn-text" : ""}`}>{sells > 0 ? fmtPercent(margin, 0) : "—"}</td>
+                  <td className={`py-1.5 pr-3 text-right tnum font-medium ${entered && sells - total < 0 ? "text-bad-text" : ""}`}>{entered ? fmtMoney(sells - total, currency) : "—"}</td>
+                  <td className={`py-1.5 pr-3 text-right tnum ${entered && margin < 0.3 && sells > 0 ? "text-warn-text" : ""}`}>{entered && sells > 0 ? fmtPercent(margin, 0) : "—"}</td>
                   {editor && (
                     <td className="py-1.5 text-right">
                       <button type="button" className="btn-ghost px-1.5 py-1" onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))} aria-label="Remove tier">
@@ -465,7 +524,7 @@ function TierEditor({
         </table>
       </div>
       <p className="mt-1.5 text-[11px] text-ink-3">
-        Customers paid is the average of your real orders at each bundle size, after discounts. It is the same number your Profit &amp; Loss uses.
+        Customers paid is the average of your real orders at each bundle size to this country, after discounts. It is the same number your Profit &amp; Loss uses.
         To change it, change the price or discount in Shopify.
       </p>
       {editor && (
@@ -473,7 +532,7 @@ function TierEditor({
           <button type="button" className="btn-ghost text-xs" onClick={() => setRows((rs) => [...rs, { ...blank, quantity: String(nextQty) }])}>
             <Plus className="h-3.5 w-3.5" /> Add qty {nextQty}
           </button>
-          {saved.length === 0 && country === "" && (
+          {saved.length === 0 && offerNoCost && (
             <button
               type="button"
               className="btn-ghost text-xs"
@@ -482,7 +541,7 @@ function TierEditor({
               onClick={() =>
                 start(async () => {
                   const zero = [{ quantity: 1, productCost: 0, shippingCost: 0 }];
-                  const r = await saveTiersAction(productId, variantId, zero, country);
+                  const r = await saveTiersAction(productId, variantId, zero, "");
                   if (r?.error) setMsg({ ok: false, text: r.error });
                   else {
                     setRows(toRows(zero));
@@ -496,17 +555,17 @@ function TierEditor({
               No cost (digital or bonus)
             </button>
           )}
-          {parsed.length > 0 && nextQty > 1 && (
+          {parsed.some((t) => t.productCost + t.shippingCost > 0) && nextQty > 1 && (
             <span className="text-xs text-ink-3">Qty {nextQty} would currently be estimated at {fmtMoney(estimate(parsed, nextQty), currency)}</span>
           )}
           <span className="flex-1" />
           {msg && <span className={`text-xs ${msg.ok ? "text-good-text" : "text-bad-text"}`}>{msg.text}</span>}
-          {saved.length > 0 && country !== "" && (
+          {saved.length > 0 && variantId === "" && (
             <button
               type="button"
               className="btn-ghost text-xs"
               disabled={pending}
-              title="Remove these country costs and use the default again"
+              title={`Remove the ${countryName(country)} costs`}
               onClick={() =>
                 start(async () => {
                   const r = await saveTiersAction(productId, variantId, [], country);
@@ -514,18 +573,18 @@ function TierEditor({
                   else {
                     setSaved([]);
                     setRows([blank]);
-                    setMsg({ ok: true, text: r?.success ?? "Back to default costs" });
+                    setMsg({ ok: true, text: r?.success ?? "Cleared" });
                     setTimeout(() => setMsg(null), 5000);
                   }
                 })
               }
             >
-              <Undo2 className="h-3.5 w-3.5" /> Use default
+              <Trash2 className="h-3.5 w-3.5" /> Clear {marketLabel(country)}
             </button>
           )}
           <button type="button" className="btn-primary py-1.5 text-xs" disabled={!dirty || pending} onClick={save}>
             {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-            Save {country === "" ? "default" : marketLabel(country)} costs
+            Save {marketLabel(country)} costs
           </button>
         </div>
       )}

@@ -59,11 +59,10 @@ owner's expectations as of the last session.
   Sales: KPIs, products table, recent orders (with "Ships to" country).
   Meta Ads: KPIs, charts, campaign table with a **"Sells product"** dropdown per
   campaign (editors only) + "Auto-link by name". Product view uses only linked campaigns.
-- Product costs: per product, country tabs (Default/US/CA/AU/UK/NZ), tier rows per
-  bundle quantity (product cost, shipping, total, per unit, **sells for** = average of
-  real orders at that quantity with an editable override, profit, margin), per-variant
-  overrides, "No cost (digital or bonus)", "Apply to past orders" (re-prices every
-  stored order with current costs). Free-gift products (always $0 in orders) are
+- Product costs: per product, country tabs (US/CA/AU/UK/NZ, no default), tier rows per
+  bundle quantity (product cost, shipping, total, per unit, **customers paid** = average of
+  real orders at that bundle size to that country, profit, margin), per-variant
+  overrides, "No cost (digital or bonus)". Saving re-prices affected orders immediately. Free-gift products (always $0 in orders) are
   flagged; their cost is charged to the paid product in the same order.
 - Expenses: custom costs (monthly/daily/one-time/% revenue/per order) + per-order
   assumptions (payment fee %, fixed fee, Shopify platform fee %, shipping, handling,
@@ -101,6 +100,11 @@ store-wide revenue; $0 lines of other products in the same order are treated as 
    costed at the combined bundle tier (Zipify post-purchase upsells), bundle sizes on the
    Product costs page are counted per order, and per-unit cost is no longer rounded
    (3 × $13.33 ≠ $40). These sync fixes reach existing orders only after a Full resync.
+   Costs are entered **per country only** (owner: supplier cost differs for US/CA/AU/UK/NZ;
+   there is no default). The "Default" tab is gone; country tabs show green (set) / amber
+   (sold there, no costs). Tiers under country "" remain only for "No cost (digital or
+   bonus)" ($0 everywhere) or as older all-country costs, which the card flags with a
+   "Remove them" button. "Customers paid" is per country, falling back to all countries.
 2. **Product ↔ campaign linking is confusing.** "Sells product" is only visible on
    the Meta Ads campaign table when campaigns have synced; the owner could not find
    it. Required: a first-class, obvious way to link campaigns to a product (e.g. on

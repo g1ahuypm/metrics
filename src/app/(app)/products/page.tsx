@@ -20,12 +20,12 @@ export default async function ProductsPage() {
   const productOfVariant = new Map(variants.map((v) => [v.id, v.productId ?? `variant:${v.shopifyId}`]));
   // A bundle is how many of a product one order holds, even when they arrive on
   // separate lines (post-purchase upsells): order+product → { quantity, price }.
-  const bundles = new Map<string, { pid: string; quantity: number; price: number }>();
+  const bundles = new Map<string, { pid: string; country: string; quantity: number; price: number }>();
   for (const s of sold) {
     const pid = s.variantId ? productOfVariant.get(s.variantId) : undefined;
     if (!pid) continue;
     const key = `${s.orderId}|${pid}`;
-    const b = bundles.get(key) ?? { pid, quantity: 0, price: 0 };
+    const b = bundles.get(key) ?? { pid, country: s.order.country ?? "", quantity: 0, price: 0 };
     b.quantity += s.quantity;
     b.price += s.price;
     bundles.set(key, b);
@@ -41,6 +41,17 @@ export default async function ProductsPage() {
     m.set(b.quantity, row);
     soldByQty.set(b.pid, m);
   }
+  // The same per shipping country: productId → country → quantity → { total, count }
+  const soldByCountry = new Map<string, Record<string, Record<number, { avg: number; count: number }>>>();
+  for (const b of bundles.values()) {
+    const byCountry = soldByCountry.get(b.pid) ?? {};
+    const row = ((byCountry[b.country] ??= {})[b.quantity] ??= { avg: 0, count: 0 });
+    row.avg += b.price; // running total; turned into an average below
+    row.count += 1;
+    soldByCountry.set(b.pid, byCountry);
+  }
+  for (const byCountry of soldByCountry.values())
+    for (const rows of Object.values(byCountry)) for (const row of Object.values(rows)) row.avg = Math.round((row.avg / row.count) * 100) / 100;
 
   // Units sold per variant, which bundle quantities customers buy, and where orders ship.
   const soldByVariant = new Map<string, { units: number; quantities: Set<number>; countries: Record<string, number> }>();
@@ -78,6 +89,7 @@ export default async function ProductsPage() {
         unitsByCountry: {},
         variants: [],
         soldPrices,
+        soldPricesByCountry: soldByCountry.get(productId) ?? {},
         isFreeGift: lines >= 3 && zero === lines,
       };
       products.set(productId, p);
