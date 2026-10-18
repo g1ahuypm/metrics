@@ -96,7 +96,9 @@ owner's expectations as of the last session.
   (needs GitHub secret `CRON_SECRET`); opening Support also checks if >2 min old. A run
   holds a lock (`Settings.supportLockUntil`), starts AI work only in its first 12 s, each AI
   call times out at 40 s, so it fits Vercel's 60 s; interrupted claims are released after
-  10 min; rate limits/outages leave the email queued for the next check.
+  10 min; rate limits/outages leave the email queued for the next check (after 3 failed
+  tries it goes to the team). Mail from the first scan (last 14 days, `SupportMessage.history`)
+  is sorted and drafted but never auto-sent, since it may already be answered in Gmail.
 - Needs `ANTHROPIC_API_KEY` in Vercel. Tested locally against Dovecot (IMAP), an SMTP
   capture server and a stand-in for the Messages API; real-model replies not yet seen.
 

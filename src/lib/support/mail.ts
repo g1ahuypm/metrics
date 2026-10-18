@@ -180,7 +180,7 @@ export async function fetchNewMail(
   cfg: MailConfig,
   state: { uidValidity: string | null; lastUid: number | null },
   limit = 200,
-): Promise<{ mail: IncomingMail[]; uidValidity: string; lastUid: number }> {
+): Promise<{ mail: IncomingMail[]; uidValidity: string; lastUid: number; firstScan: boolean }> {
   const client = imapClient(cfg);
   await client.connect();
   const lock = await client.getMailboxLock("INBOX");
@@ -207,7 +207,7 @@ export async function fetchNewMail(
       }
     }
     if (fresh && !uids.length) lastUid = Math.max(0, Number(box.uidNext ?? 1) - 1);
-    return { mail, uidValidity, lastUid };
+    return { mail, uidValidity, lastUid, firstScan: fresh };
   } finally {
     lock.release();
     await client.logout().catch(() => client.close());

@@ -315,6 +315,8 @@ model SupportMessage {
   sentAt      DateTime
   sentBy      String? // "AI" or the team member's name, for "out"
   processedAt DateTime? // when the AI handled this inbound message
+  history     Boolean   @default(false) // arrived before Support was connected: never auto-answered
+  aiAttempts  Int       @default(0) // failed AI tries (rate limit, outage); after 3 a person takes over
   createdAt   DateTime      @default(now())
 
   @@index([threadId, sentAt])

@@ -17,7 +17,7 @@ export type SupportRunResult = { fetched: number; handled: number; autoSent: num
 // Storing incoming mail
 // ---------------------------------------------------------------------------
 
-async function storeIncoming(mail: IncomingMail): Promise<void> {
+async function storeIncoming(mail: IncomingMail, history: boolean): Promise<void> {
   if (await db.supportMessage.findUnique({ where: { messageId: mail.messageId }, select: { id: true } })) return;
 
   // Same conversation: Gmail's thread id, else the message it replies to.
@@ -70,6 +70,7 @@ async function storeIncoming(mail: IncomingMail): Promise<void> {
       sentAt: mail.sentAt,
       // Newsletters and automated notifications never go to the AI.
       processedAt: skipAi ? new Date() : null,
+      history,
     },
   });
 }
@@ -163,13 +164,15 @@ async function handleThread(cfg: MailConfig, threadId: string, articles: Awaited
   const claimedAt = new Date();
   const claim = await db.supportMessage.updateMany({ where: { threadId, direction: "in", processedAt: null }, data: { processedAt: claimedAt } });
   if (claim.count === 0) return "other";
+  const onlyHistory = (await db.supportMessage.count({ where: { threadId, processedAt: claimedAt, history: false } })) === 0;
 
   const { thread, settings, kb, orders, result } = await decideThread(threadId, articles);
   const orderNames = orders.map((o) => o.name).join(", ") || null;
 
   if (!result.ok) {
-    if (result.retry) {
-      await db.supportMessage.updateMany({ where: { threadId, processedAt: claimedAt }, data: { processedAt: null } });
+    const tries = await db.supportMessage.aggregate({ where: { threadId, processedAt: claimedAt }, _max: { aiAttempts: true } });
+    if (result.retry && (tries._max.aiAttempts ?? 0) < 2) {
+      await db.supportMessage.updateMany({ where: { threadId, processedAt: claimedAt }, data: { processedAt: null, aiAttempts: { increment: 1 } } });
       return "retry";
     }
     await db.supportThread.update({
@@ -191,7 +194,9 @@ async function handleThread(cfg: MailConfig, threadId: string, articles: Awaited
   const article = kb.find((a) => a.key === d.topic);
   const text = d.reply.trim() ? withSignature(d.reply, settings.supportSignature) : null;
   const actionNote = d.teamAction.trim() || (article?.flagForTeam ? d.summary : "") || null;
-  let reason = holdReason(d, article, settings.supportAutoReply);
+  let reason = onlyHistory
+    ? "Arrived before Support was connected. Check it wasn't already answered in Gmail"
+    : holdReason(d, article, settings.supportAutoReply);
   // Hard rule: a reply never goes out on its own if it names an order that isn't this customer's.
   const own = new Set(orders.map((o) => o.name.replace("#", "").toUpperCase()));
   const foreign = orderNumbersIn(d.reply).filter((n) => !own.has(n));
@@ -252,8 +257,9 @@ export async function runSupport(opts: { budgetMs?: number } = {}): Promise<Supp
       data: { processedAt: null },
     });
     const s = await getSettingsRow();
-    const { mail, uidValidity, lastUid } = await fetchNewMail(cfg, { uidValidity: s.supportUidValidity, lastUid: s.supportLastUid });
-    for (const m of mail.sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime())) await storeIncoming(m);
+    const { mail, uidValidity, lastUid, firstScan } = await fetchNewMail(cfg, { uidValidity: s.supportUidValidity, lastUid: s.supportLastUid });
+    // The first scan brings in the last 14 days, which may already have been answered in Gmail.
+    for (const m of mail.sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime())) await storeIncoming(m, firstScan);
     out.fetched = mail.length;
     await db.settings.update({ where: { id: "default" }, data: { supportUidValidity: uidValidity, supportLastUid: lastUid, lastSupportSyncAt: new Date() } });
 
