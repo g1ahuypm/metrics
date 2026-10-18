@@ -8,7 +8,7 @@ export type SyncSource = "shopify" | "meta";
 
 export type SyncResult = { source: SyncSource; ok: boolean; message: string; records: number };
 
-export async function runSync(source: SyncSource): Promise<SyncResult> {
+export async function runSync(source: SyncSource, opts: { full?: boolean } = {}): Promise<SyncResult> {
   const log = await db.syncLog.create({ data: { source, status: "running" } });
   try {
     const cfg = await getIntegrationConfig();
@@ -16,9 +16,9 @@ export async function runSync(source: SyncSource): Promise<SyncResult> {
     let records = 0;
     if (source === "shopify") {
       if (!cfg.shopify) throw new Error("Shopify is not connected. Add your store domain, Client ID and Client secret in Settings.");
-      const r = await syncShopify(cfg);
+      const r = await syncShopify(cfg, opts);
       records = r.orders;
-      message = `Synced ${r.orders} orders and ${r.variants} product variants`;
+      message = `${opts.full ? "Full resync: " : "Synced "}${r.orders} orders and ${r.variants} product variants`;
     } else {
       if (!cfg.meta) throw new Error("Meta Ads is not connected. Add your ad account ID and access token in Settings.");
       const r = await syncMeta(cfg);

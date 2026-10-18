@@ -75,6 +75,17 @@ export function IntegrationCard({
             {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             {syncing ? "Syncing…" : "Sync now"}
           </button>
+          {source === "shopify" && (
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={syncing}
+              title="Re-import the last 60 days of orders from scratch. Use after changing how orders are priced."
+              onClick={() => startSync(async () => setSyncResult(await triggerSyncAction(source, { full: true })))}
+            >
+              Full resync (60 days)
+            </button>
+          )}
           <button type="button" className="btn-secondary" onClick={() => setEditing(true)}>
             Update credentials
           </button>

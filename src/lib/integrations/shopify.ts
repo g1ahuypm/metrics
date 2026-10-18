@@ -397,11 +397,11 @@ export async function recomputeNewCustomers(): Promise<void> {
   });
 }
 
-export async function syncShopify(cfg: IntegrationConfig): Promise<{ variants: number; orders: number }> {
+export async function syncShopify(cfg: IntegrationConfig, opts: { full?: boolean } = {}): Promise<{ variants: number; orders: number }> {
   const variants = await syncShopifyVariants(cfg);
   // Re-pull the last few days on every run so refunds and edits are captured.
-  // Custom apps can read 60 days of orders, so the first run asks for exactly that.
-  const since = cfg.lastShopifySyncAt ? subDays(cfg.lastShopifySyncAt, 3) : subDays(new Date(), 60);
+  // Custom apps can read 60 days of orders, so the first (or a full) run asks for exactly that.
+  const since = cfg.lastShopifySyncAt && !opts.full ? subDays(cfg.lastShopifySyncAt, 3) : subDays(new Date(), 60);
   const orders = await syncShopifyOrders(cfg, since);
   await db.settings.update({ where: { id: "default" }, data: { lastShopifySyncAt: new Date() } });
   return { variants, orders };

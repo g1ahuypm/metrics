@@ -86,8 +86,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <div className="card p-4">
           <h2 className="text-sm font-semibold">Automatic sync</h2>
           <p className="mt-1 text-xs text-ink-2">
-            Syncs run when you click the buttons above. To keep data fresh automatically, call the endpoint below every hour
-            from Vercel Cron (already configured in <code>vercel.json</code>), a server cron, or any uptime service.
+            Data refreshes by itself: whenever someone opens the dashboard and the last sync is over an hour old, a sync runs in
+            the background, and a scheduled sync runs daily. The buttons above sync right now. The endpoint below is for your own
+            scheduler if you want more frequent syncs.
           </p>
           <pre className="mt-3 overflow-x-auto rounded-lg bg-surface-2 p-3 text-xs">
 {`curl -H "Authorization: Bearer $CRON_SECRET" \\
