@@ -5,10 +5,11 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 function authorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
+  // Trimmed on both sides: a space or line break copied along with the value shouldn't lock the scheduler out.
+  const secret = process.env.CRON_SECRET?.trim();
   if (!secret) return false;
-  const header = req.headers.get("authorization") ?? "";
-  return header === `Bearer ${secret}` || req.nextUrl.searchParams.get("secret") === secret;
+  const header = (req.headers.get("authorization") ?? "").trim();
+  return header === `Bearer ${secret}` || req.nextUrl.searchParams.get("secret")?.trim() === secret;
 }
 
 export async function GET(req: NextRequest) {

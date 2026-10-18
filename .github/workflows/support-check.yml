@@ -26,4 +26,5 @@ jobs:
             echo "::notice::Not set up yet: add a repository secret named CRON_SECRET (same value as in Vercel)."
             exit 0
           fi
-          curl --fail-with-body -sS --max-time 90 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/support"
+          SECRET="$(printf '%s' "$CRON_SECRET" | tr -d '[:space:]')"
+          curl --fail-with-body -sS --max-time 90 -H "Authorization: Bearer $SECRET" "$APP_URL/api/cron/support"
