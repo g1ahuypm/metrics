@@ -10,7 +10,7 @@ import { FormMessage } from "@/components/FormMessage";
 import { SubmitButton } from "@/components/SubmitButton";
 import type { SyncResult } from "@/lib/sync";
 
-type Field = { name: string; label: string; placeholder: string; defaultValue?: string; type?: string };
+type Field = { name: string; label: string; placeholder: string; defaultValue?: string; type?: string; optional?: boolean };
 
 export function IntegrationCard({
   source,
@@ -102,7 +102,7 @@ export function IntegrationCard({
                 placeholder={f.placeholder}
                 defaultValue={f.defaultValue}
                 autoComplete="off"
-                required
+                required={!f.optional}
               />
             </div>
           ))}

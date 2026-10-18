@@ -15,7 +15,7 @@ export async function runSync(source: SyncSource): Promise<SyncResult> {
     let message = "";
     let records = 0;
     if (source === "shopify") {
-      if (!cfg.shopify) throw new Error("Shopify is not connected. Add your store domain and access token in Settings.");
+      if (!cfg.shopify) throw new Error("Shopify is not connected. Add your store domain, Client ID and Client secret in Settings.");
       const r = await syncShopify(cfg);
       records = r.orders;
       message = `Synced ${r.orders} orders and ${r.variants} product variants`;

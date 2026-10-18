@@ -1,6 +1,6 @@
 import { requireEditor } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getSettingsRow } from "@/lib/integrations/config";
+import { getIntegrationConfig, getSettingsRow } from "@/lib/integrations/config";
 import { fmtDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
 import { GeneralSettingsForm, IntegrationCard, PasswordForm } from "./SettingsClient";
@@ -14,9 +14,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     db.syncLog.findMany({ orderBy: { startedAt: "desc" }, take: 12 }),
   ]);
 
-  const shopifyToken = decrypt(settings.shopifyToken) || process.env.SHOPIFY_ACCESS_TOKEN || "";
+  const cfg = await getIntegrationConfig();
   const metaToken = decrypt(settings.metaToken) || process.env.META_ACCESS_TOKEN || "";
   const shopifyDomain = settings.shopifyDomain || process.env.SHOPIFY_STORE_DOMAIN || "";
+  const shopifyClientId = settings.shopifyClientId || process.env.SHOPIFY_CLIENT_ID || "";
+  const shopifySecretHint =
+    cfg.shopify?.kind === "client" ? mask(cfg.shopify.clientSecret) : cfg.shopify?.kind === "static" ? mask(cfg.shopify.token) : "";
   const metaAccount = settings.metaAdAccountId || process.env.META_AD_ACCOUNT_ID || "";
 
   return (
@@ -34,19 +37,23 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           source="shopify"
           title="Shopify"
           description="Orders, refunds, products and cost per item from the Admin API."
-          connected={Boolean(shopifyDomain && shopifyToken)}
-          identity={shopifyDomain}
-          tokenHint={mask(shopifyToken)}
+          connected={Boolean(cfg.shopify)}
+          identity={`${shopifyDomain}${shopifyClientId ? ` · client ${shopifyClientId.slice(0, 8)}…` : ""}`}
+          tokenHint={shopifySecretHint}
           lastSync={fmtDateTime(settings.lastShopifySyncAt)}
           fields={[
             { name: "domain", label: "Store domain", placeholder: "my-store.myshopify.com", defaultValue: shopifyDomain },
-            { name: "token", label: "Admin API access token", placeholder: "shpat_…", type: "password" },
+            { name: "clientId", label: "Client ID", placeholder: "from Dev Dashboard → App settings", defaultValue: shopifyClientId },
+            { name: "clientSecret", label: "Client secret", placeholder: "shpss_…", type: "password" },
+            { name: "token", label: "Legacy Admin API access token (only for apps created before 2026)", placeholder: "shpat_… (leave empty for Dev Dashboard apps)", type: "password", optional: true },
           ]}
           help={[
-            "Shopify admin → Settings → Apps and sales channels → Develop apps → Create an app.",
-            "Configure Admin API access scopes: read_orders, read_products, read_inventory (cost per item), read_customers (new vs returning). Read-only is enough.",
-            "Shopify gives custom apps the last 60 days of orders. The first sync imports those; later syncs keep adding new orders from then on.",
-            "Install the app and copy the Admin API access token. Set 'Cost per item' on products so COGS syncs automatically.",
+            "Go to dev.shopify.com → Apps → Create app → Start from Dev Dashboard. Name it anything.",
+            "Open Versions → New version. Under Scopes tick read_orders, read_products, read_inventory and read_customers, then Release.",
+            "On the Overview page click Install app (Installs card), pick your store and confirm. The app must be installed for the connection to work.",
+            "App settings → Credentials: copy the Client ID and Client secret into the fields here. Tokens are fetched automatically and renewed every 24 hours.",
+            "App settings → Protected customer data access: choose a reason such as Analytics and save, so orders can be matched to customers (new vs returning). Without it, everything else still syncs.",
+            "Shopify lets apps read the last 60 days of orders. The first sync imports those; later syncs keep adding new orders.",
           ]}
         />
         <IntegrationCard

@@ -45,7 +45,7 @@ Nothing beyond this repository and Node.js 22 to run it locally. To put it onlin
 | Hosting | [Vercel](https://vercel.com) (zero-config for Next.js, hourly cron included), [Railway](https://railway.app), [Render](https://render.com), or any VPS with Docker |
 | Database | SQLite (built in, fine for one store) or Postgres on [Neon](https://neon.tech) / [Supabase](https://supabase.com) for Vercel-style hosts that have no persistent disk |
 | Hourly sync trigger | Vercel Cron (already configured), the `sync` service in `docker-compose.yml`, or a free ping service such as cron-job.org |
-| Shopify | A custom app in your own store admin (no App Store listing needed) |
+| Shopify | A free app in your Dev Dashboard (dev.shopify.com), installed only on your own store |
 | Meta | A system-user token from Business Settings |
 
 No TrueProfit, Triple Whale or similar subscription is needed. Voice or note-taking tools are unrelated to running this; the app has its own web interface.
@@ -55,28 +55,34 @@ No TrueProfit, Triple Whale or similar subscription is needed. Voice or note-tak
 Go to **Settings** (owner or admin only).
 
 **Shopify**
-1. Shopify admin → Settings → Apps and sales channels → Develop apps → Create an app.
-2. Configure these Admin API access scopes:
+
+Shopify apps are created in the [Dev Dashboard](https://dev.shopify.com). The dashboard uses the client credentials grant, so there is no token to copy: it exchanges your app's Client ID and Client secret for a 24-hour access token and renews it automatically.
+
+1. Go to dev.shopify.com → Apps → **Create app** → *Start from Dev Dashboard*. Name it anything.
+2. Open **Versions** → **New version**. Under Scopes tick:
 
    | Scope | Used for |
    |---|---|
    | `read_orders` | Orders, refunds, line items, Shopify Payments fees |
    | `read_products` | Product and variant names, SKUs, prices, images |
-   | `read_inventory` | Shopify's "Cost per item" on each variant (used only when you have not entered supplier costs) |
-   | `read_customers` | Customer ID and email on orders, for new vs returning customers |
+   | `read_inventory` | Shopify's "Cost per item" (used only when you have not entered supplier costs) |
+   | `read_customers` | Customer ID on orders, for new vs returning customers |
 
-   Read-only scopes are enough; the app never writes to your store.
+   Then **Release**.
+3. On the app's Overview page click **Install app** (Installs card), choose your store and confirm. The app must be installed on the store.
+4. **App settings → Credentials**: copy the Client ID and Client secret into the dashboard's Settings page together with your `*.myshopify.com` domain. Click *Save & test connection*.
+5. Optional but recommended: **App settings → Protected customer data access**, pick a reason such as Analytics and save. This lets orders be matched to customers for new-vs-returning counts. Without it everything else still syncs.
 
-   Shopify lets custom apps read the last **60 days** of orders. The first sync imports those, and every sync after that keeps adding new orders, so history builds up from the day you connect. (Older orders would need the `read_all_orders` scope, which Shopify only grants to Partner Dashboard apps on request.)
-3. Install the app and paste the Admin API access token plus your `*.myshopify.com` domain.
-4. Run **Sync now**. Your products appear on the **Product costs** page, where you enter supplier costs per bundle size. Shopify's "Cost per item" is used only for products with no tiers.
+Shopify lets apps read the last **60 days** of orders. The first sync imports those, and every sync after that keeps adding new orders, so history builds up from the day you connect.
+
+If you still have an admin-created custom app from before Shopify retired them, paste its `shpat_` token in the legacy field instead of a client ID and secret.
 
 **Meta Ads**
 1. Meta Business Settings → Users → System users → add a system user and assign it the ad account.
 2. Generate a token with the `ads_read` permission. System-user tokens do not expire.
 3. Paste the token and the ad account ID (the number after `act=` in Ads Manager, with or without the `act_` prefix).
 
-Tokens are stored in the database encrypted with `APP_SECRET`. Click **Sync now** on each card after connecting. The first sync pulls 90 days of history.
+Secrets are stored in the database encrypted with `APP_SECRET`. Click **Sync now** on each card after connecting. The first sync pulls 90 days of history.
 
 ## Keeping data fresh
 

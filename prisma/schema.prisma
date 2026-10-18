@@ -62,10 +62,15 @@ model Settings {
   currency           String    @default("USD")
   timezone           String    @default("UTC")
 
-  // Shopify (token stored encrypted with APP_SECRET)
-  shopifyDomain      String?
-  shopifyToken       String?
-  lastShopifySyncAt  DateTime?
+  // Shopify. Dev Dashboard apps authenticate with a client ID + secret
+  // (client credentials grant; tokens last 24h and are cached below).
+  // Legacy admin-created custom apps use a static shpat_ token in shopifyToken.
+  shopifyDomain        String?
+  shopifyClientId      String?
+  shopifyClientSecret  String?   // encrypted
+  shopifyToken         String?   // encrypted; static legacy token OR cached short-lived token
+  shopifyTokenExpires  DateTime? // null for a static legacy token
+  lastShopifySyncAt    DateTime?
 
   // Meta Ads (token stored encrypted with APP_SECRET)
   metaAdAccountId    String?

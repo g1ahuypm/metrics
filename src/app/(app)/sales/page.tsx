@@ -151,7 +151,9 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
                         <td className="font-medium">{o.name}</td>
                         <td className="whitespace-nowrap text-ink-2">{fmtDate(o.createdAt, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td>
                         <td>
-                          <div className="max-w-[180px] truncate">{o.customerEmail ?? "Guest"}</div>
+                          <div className="max-w-[180px] truncate">
+                            {o.customerEmail ?? (o.customerId ? `Customer …${o.customerId.slice(-5)}` : "Guest")}
+                          </div>
                           {o.isNewCustomer && <span className="badge">New</span>}
                         </td>
                         <td className="text-ink-2">

@@ -3,7 +3,8 @@ import { subDays } from "date-fns";
 import { db } from "../db";
 import { costOrder } from "../costing";
 import { loadCostBook } from "../costbook";
-import type { IntegrationConfig } from "./config";
+import { decrypt, encrypt } from "../crypto";
+import type { IntegrationConfig, ShopifyAuth } from "./config";
 
 const API_VERSION = "2025-07";
 
@@ -26,7 +27,7 @@ type ShopifyOrder = {
   currentTotalDiscountsSet: Money;
   totalShippingPriceSet: Money;
   totalRefundedSet: Money;
-  customer: { id: string; defaultEmailAddress: { emailAddress: string | null } | null } | null;
+  customer: { id: string } | null;
   lineItems: {
     nodes: {
       id: string;
@@ -56,40 +57,117 @@ type ShopifyVariant = {
 
 const num = (m: Money | null | undefined) => (m ? Number(m.shopMoney.amount) : 0);
 
-export async function shopifyGraphQL<T>(
-  cfg: { domain: string; token: string },
-  query: string,
-  variables: Record<string, unknown> = {},
-): Promise<T> {
-  const res = await fetch(`https://${cfg.domain}/admin/api/${API_VERSION}/graphql.json`, {
+// ---------------------------------------------------------------------------
+// Access tokens
+// ---------------------------------------------------------------------------
+
+const TOKEN_MARGIN_MS = 10 * 60 * 1000;
+
+/**
+ * Client credentials grant: exchanges the app's client ID + secret for a
+ * 24-hour Admin API token. Works for apps installed on stores in your own
+ * organization (Dev Dashboard apps).
+ */
+export async function fetchClientCredentialsToken(auth: { domain: string; clientId: string; clientSecret: string }) {
+  const res = await fetch(`https://${auth.domain}/admin/oauth/access_token`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": cfg.token,
-    },
-    body: JSON.stringify({ query, variables }),
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ client_id: auth.clientId, client_secret: auth.clientSecret, grant_type: "client_credentials" }),
     cache: "no-store",
   });
+  const text = await res.text();
+  if (!res.ok) {
+    let hint = text.slice(0, 200);
+    if (res.status === 400 || res.status === 401) {
+      hint =
+        "Shopify rejected the Client ID or Client secret. Check both in Dev Dashboard → App settings → Credentials, and make sure the app is installed on this store (Installs card → Install app).";
+    }
+    if (res.status === 404) hint = "Store domain not found. It should look like my-store.myshopify.com.";
+    throw new Error(hint);
+  }
+  const json = JSON.parse(text) as { access_token?: string; expires_in?: number; scope?: string; error_description?: string };
+  if (!json.access_token) throw new Error(json.error_description ?? "Shopify did not return an access token");
+  return {
+    token: json.access_token,
+    expiresAt: new Date(Date.now() + (json.expires_in ?? 86399) * 1000),
+    scope: json.scope ?? "",
+  };
+}
+
+const tokenCache = new Map<string, { token: string; expiresAt: Date }>();
+
+/** Returns a usable Admin API token, refreshing a client-credentials token when it is near expiry. */
+export async function getShopifyToken(auth: ShopifyAuth, force = false): Promise<string> {
+  if (auth.kind === "static") return auth.token;
+  const key = `${auth.domain}:${auth.clientId}`;
+  const now = Date.now();
+  const inMemory = tokenCache.get(key);
+  if (!force && inMemory && inMemory.expiresAt.getTime() - now > TOKEN_MARGIN_MS) return inMemory.token;
+
+  if (!force) {
+    const row = await db.settings.findUnique({ where: { id: "default" }, select: { shopifyToken: true, shopifyTokenExpires: true } });
+    const cached = decrypt(row?.shopifyToken);
+    if (cached && row?.shopifyTokenExpires && row.shopifyTokenExpires.getTime() - now > TOKEN_MARGIN_MS) {
+      tokenCache.set(key, { token: cached, expiresAt: row.shopifyTokenExpires });
+      return cached;
+    }
+  }
+
+  const fresh = await fetchClientCredentialsToken(auth);
+  tokenCache.set(key, fresh);
+  await db.settings.update({
+    where: { id: "default" },
+    data: { shopifyToken: encrypt(fresh.token), shopifyTokenExpires: fresh.expiresAt },
+  });
+  return fresh.token;
+}
+
+export class ShopifyGraphQLError extends Error {
+  constructor(message: string, public readonly errors: { message: string; extensions?: { code?: string } }[]) {
+    super(message);
+  }
+}
+
+export async function shopifyGraphQL<T>(auth: ShopifyAuth, query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  const call = async (token: string) =>
+    fetch(`https://${auth.domain}/admin/api/${API_VERSION}/graphql.json`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
+      body: JSON.stringify({ query, variables }),
+      cache: "no-store",
+    });
+
+  let res = await call(await getShopifyToken(auth));
+  if (res.status === 401 && auth.kind === "client") {
+    // Token expired or was revoked: fetch a fresh one and retry once.
+    res = await call(await getShopifyToken(auth, true));
+  }
   if (!res.ok) {
     const text = await res.text();
+    if (res.status === 401) throw new Error("Shopify rejected the access token. Reconnect the store in Settings.");
+    if (res.status === 403) throw new Error("Shopify denied access. Check the app's scopes in the Dev Dashboard, release a new version, and reinstall the app.");
     throw new Error(`Shopify API ${res.status}: ${text.slice(0, 300)}`);
   }
-  const json = (await res.json()) as { data?: T; errors?: { message: string }[] };
+  const json = (await res.json()) as { data?: T; errors?: { message: string; extensions?: { code?: string } }[] };
   if (json.errors?.length) {
-    throw new Error(`Shopify GraphQL: ${json.errors.map((e) => e.message).join("; ")}`);
+    throw new ShopifyGraphQLError(`Shopify GraphQL: ${json.errors.map((e) => e.message).join("; ")}`, json.errors);
   }
   if (!json.data) throw new Error("Shopify GraphQL returned no data");
   return json.data;
 }
 
-/** Quick connectivity check used by the settings page. Returns the shop name. */
-export async function testShopify(cfg: { domain: string; token: string }): Promise<string> {
-  const data = await shopifyGraphQL<{ shop: { name: string; currencyCode: string } }>(
-    cfg,
-    `{ shop { name currencyCode } }`,
-  );
-  return `${data.shop.name} (${data.shop.currencyCode})`;
+/** Connectivity check used by the settings page. Returns the shop name and the granted scopes. */
+export async function testShopify(auth: ShopifyAuth): Promise<{ label: string; missingScopes: string[] }> {
+  const data = await shopifyGraphQL<{
+    shop: { name: string; currencyCode: string };
+    currentAppInstallation: { accessScopes: { handle: string }[] };
+  }>(auth, `{ shop { name currencyCode } currentAppInstallation { accessScopes { handle } } }`);
+  const granted = new Set(data.currentAppInstallation.accessScopes.map((s) => s.handle));
+  const missing = REQUIRED_SCOPES.filter((s) => !granted.has(s));
+  return { label: `${data.shop.name} (${data.shop.currencyCode})`, missingScopes: missing };
 }
+
+export const REQUIRED_SCOPES = ["read_orders", "read_products", "read_inventory", "read_customers"];
 
 const VARIANTS_QUERY = `
 query Variants($cursor: String) {
@@ -117,7 +195,7 @@ query Orders($cursor: String, $query: String) {
       currentTotalDiscountsSet { shopMoney { amount } }
       totalShippingPriceSet { shopMoney { amount } }
       totalRefundedSet { shopMoney { amount } }
-      customer { id defaultEmailAddress { emailAddress } }
+      __CUSTOMER__
       lineItems(first: 100) {
         nodes {
           id title sku quantity
@@ -179,11 +257,21 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
   let cursor: string | null = null;
   let count = 0;
   const query = `updated_at:>='${since.toISOString()}'`;
+  // The customer field needs the app's "protected customer data" access to be
+  // configured. When it is not, sync everything else and skip new-vs-returning.
+  let withCustomer = true;
 
   do {
-    const data: {
-      orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ShopifyOrder[] };
-    } = await shopifyGraphQL(cfg.shopify, ORDERS_QUERY, { cursor, query });
+    type Page = { orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ShopifyOrder[] } };
+    let data: Page;
+    try {
+      data = await shopifyGraphQL<Page>(cfg.shopify, ORDERS_QUERY.replace("__CUSTOMER__", withCustomer ? "customer { id }" : ""), { cursor, query });
+    } catch (err) {
+      if (withCustomer && err instanceof ShopifyGraphQLError && /customer|protected/i.test(err.message)) {
+        withCustomer = false;
+        data = await shopifyGraphQL<Page>(cfg.shopify, ORDERS_QUERY.replace("__CUSTOMER__", ""), { cursor, query });
+      } else throw err;
+    }
 
     for (const o of data.orders.nodes) {
       const total = num(o.currentTotalPriceSet);
@@ -247,7 +335,7 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
         transactionFees,
         platformFees,
         customerId: o.customer?.id ?? null,
-        customerEmail: o.customer?.defaultEmailAddress?.emailAddress ?? null,
+        customerEmail: null,
         itemCount,
         source: o.sourceName,
         tags: o.tags.join(", "),

@@ -5,8 +5,8 @@ import { z } from "zod";
 import { db } from "../db";
 import { requireEditor } from "../auth";
 import { encrypt } from "../crypto";
-import { normalizeAdAccount, normalizeDomain } from "../integrations/config";
-import { testShopify } from "../integrations/shopify";
+import { normalizeAdAccount, normalizeDomain, type ShopifyAuth } from "../integrations/config";
+import { fetchClientCredentialsToken, testShopify } from "../integrations/shopify";
 import { testMeta } from "../integrations/meta";
 import type { FormState } from "./auth";
 
@@ -66,27 +66,49 @@ export async function updateCostAssumptionsAction(_prev: FormState, formData: Fo
 export async function connectShopifyAction(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireEditor();
   const domain = normalizeDomain(String(formData.get("domain") ?? ""));
-  const token = String(formData.get("token") ?? "").trim();
+  const clientId = String(formData.get("clientId") ?? "").trim();
+  const clientSecret = String(formData.get("clientSecret") ?? "").trim();
+  const legacyToken = String(formData.get("token") ?? "").trim();
+
   if (!domain.endsWith(".myshopify.com")) return { error: "Store domain should look like my-store.myshopify.com" };
-  if (!token) return { error: "Enter the Admin API access token" };
-  if (/^shpss_/i.test(token)) {
-    return {
-      error:
-        "That is the app's API secret key, which cannot read store data. In your custom app open the API credentials tab and copy the Admin API access token, which starts with shpat_.",
-    };
+
+  let auth: ShopifyAuth;
+  if (legacyToken) {
+    if (/^shpss_/i.test(legacyToken)) {
+      return { error: "That is a client secret, not a legacy token. Paste it in the Client secret field instead, together with the Client ID." };
+    }
+    if (!/^shpat_/i.test(legacyToken)) return { error: "A legacy Admin API access token starts with shpat_." };
+    auth = { domain, kind: "static", token: legacyToken };
+  } else {
+    if (!clientId) return { error: "Enter the Client ID from Dev Dashboard → App settings → Credentials." };
+    if (!clientSecret) return { error: "Enter the Client secret (starts with shpss_)." };
+    if (/^shpat_/i.test(clientSecret)) return { error: "That is a legacy access token. Use the legacy token field below instead." };
+    auth = { domain, kind: "client", clientId, clientSecret };
   }
-  if (!/^shpat_/i.test(token)) {
-    return { error: "The Admin API access token starts with shpat_. Check the API credentials tab of your custom app." };
-  }
+
   try {
-    const shop = await testShopify({ domain, token });
-    await db.settings.upsert({
-      where: { id: "default" },
-      update: { shopifyDomain: domain, shopifyToken: encrypt(token) },
-      create: { id: "default", shopifyDomain: domain, shopifyToken: encrypt(token) },
-    });
+    // Fresh token on every connect so a rotated secret is picked up immediately.
+    if (auth.kind === "client") {
+      const fresh = await fetchClientCredentialsToken(auth);
+      await db.settings.upsert({
+        where: { id: "default" },
+        update: { shopifyToken: encrypt(fresh.token), shopifyTokenExpires: fresh.expiresAt },
+        create: { id: "default", shopifyToken: encrypt(fresh.token), shopifyTokenExpires: fresh.expiresAt },
+      });
+    }
+    const result = await testShopify(auth);
+    const data =
+      auth.kind === "client"
+        ? { shopifyDomain: domain, shopifyClientId: auth.clientId, shopifyClientSecret: encrypt(auth.clientSecret) }
+        : { shopifyDomain: domain, shopifyClientId: null, shopifyClientSecret: null, shopifyToken: encrypt(auth.token), shopifyTokenExpires: null };
+    await db.settings.upsert({ where: { id: "default" }, update: data, create: { id: "default", ...data } });
     revalidatePath("/", "layout");
-    return { success: `Connected to ${shop}. Run a sync to import orders.` };
+    if (result.missingScopes.length) {
+      return {
+        success: `Connected to ${result.label}, but the app is missing scopes: ${result.missingScopes.join(", ")}. Add them to a new version in the Dev Dashboard, release it, and reinstall the app. Then run a sync.`,
+      };
+    }
+    return { success: `Connected to ${result.label}. Run a sync to import orders.` };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not connect to Shopify" };
   }
@@ -118,7 +140,7 @@ export async function disconnectAction(source: "shopify" | "meta"): Promise<void
     where: { id: "default" },
     data:
       source === "shopify"
-        ? { shopifyDomain: null, shopifyToken: null, lastShopifySyncAt: null }
+        ? { shopifyDomain: null, shopifyClientId: null, shopifyClientSecret: null, shopifyToken: null, shopifyTokenExpires: null, lastShopifySyncAt: null }
         : { metaAdAccountId: null, metaToken: null, lastMetaSyncAt: null },
   });
   revalidatePath("/", "layout");

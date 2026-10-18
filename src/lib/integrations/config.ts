@@ -2,11 +2,16 @@ import "server-only";
 import { db } from "../db";
 import { decrypt } from "../crypto";
 
+/** Either a static legacy token or client credentials (token fetched on demand). */
+export type ShopifyAuth =
+  | { domain: string; kind: "static"; token: string }
+  | { domain: string; kind: "client"; clientId: string; clientSecret: string };
+
 export type IntegrationConfig = {
   storeName: string;
   currency: string;
   timezone: string;
-  shopify: { domain: string; token: string } | null;
+  shopify: ShopifyAuth | null;
   meta: { adAccountId: string; token: string } | null;
   paymentFeePercent: number;
   paymentFeeFixed: number;
@@ -30,8 +35,13 @@ export async function getSettingsRow() {
 export async function getIntegrationConfig(): Promise<IntegrationConfig> {
   const s = await getSettingsRow();
 
-  const shopifyDomain = s.shopifyDomain || process.env.SHOPIFY_STORE_DOMAIN || "";
-  const shopifyToken = decrypt(s.shopifyToken) || process.env.SHOPIFY_ACCESS_TOKEN || "";
+  const shopifyDomain = normalizeDomain(s.shopifyDomain || process.env.SHOPIFY_STORE_DOMAIN || "");
+  const clientId = s.shopifyClientId || process.env.SHOPIFY_CLIENT_ID || "";
+  const clientSecret = decrypt(s.shopifyClientSecret) || process.env.SHOPIFY_CLIENT_SECRET || "";
+  const staticToken = s.shopifyTokenExpires ? "" : decrypt(s.shopifyToken) || process.env.SHOPIFY_ACCESS_TOKEN || "";
+  let shopify: ShopifyAuth | null = null;
+  if (shopifyDomain && clientId && clientSecret) shopify = { domain: shopifyDomain, kind: "client", clientId, clientSecret };
+  else if (shopifyDomain && staticToken) shopify = { domain: shopifyDomain, kind: "static", token: staticToken };
   const metaAccount = s.metaAdAccountId || process.env.META_AD_ACCOUNT_ID || "";
   const metaToken = decrypt(s.metaToken) || process.env.META_ACCESS_TOKEN || "";
 
@@ -39,7 +49,7 @@ export async function getIntegrationConfig(): Promise<IntegrationConfig> {
     storeName: s.storeName,
     currency: s.currency,
     timezone: s.timezone,
-    shopify: shopifyDomain && shopifyToken ? { domain: normalizeDomain(shopifyDomain), token: shopifyToken } : null,
+    shopify,
     meta: metaAccount && metaToken ? { adAccountId: normalizeAdAccount(metaAccount), token: metaToken } : null,
     paymentFeePercent: s.paymentFeePercent,
     paymentFeeFixed: s.paymentFeeFixed,
