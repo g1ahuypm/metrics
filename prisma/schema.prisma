@@ -19,7 +19,7 @@ model User {
   name         String
   passwordHash String
   // OWNER: full control. ADMIN: everything except removing the owner.
-  // PARTNER: read-only access to all reports.
+  // PARTNER: read-only access to all reports. SUPPORT: the Support inbox only.
   role         String    @default("PARTNER")
   createdAt    DateTime  @default(now())
   lastLoginAt  DateTime?
@@ -55,35 +55,45 @@ model Invite {
 // ---------------------------------------------------------------------------
 
 model Settings {
-  id                 String    @id @default("default")
-  storeName          String    @default("My Store")
-  currency           String    @default("USD")
-  timezone           String    @default("UTC")
+  id        String @id @default("default")
+  storeName String @default("My Store")
+  currency  String @default("USD")
+  timezone  String @default("UTC")
 
   // Shopify. Dev Dashboard apps authenticate with a client ID + secret
   // (client credentials grant; tokens last 24h and are cached below).
   // Legacy admin-created custom apps use a static shpat_ token in shopifyToken.
-  shopifyDomain        String?
-  shopifyClientId      String?
-  shopifyClientSecret  String?   // encrypted
-  shopifyToken         String?   // encrypted; static legacy token OR cached short-lived token
-  shopifyTokenExpires  DateTime? // null for a static legacy token
-  lastShopifySyncAt    DateTime?
+  shopifyDomain       String?
+  shopifyClientId     String?
+  shopifyClientSecret String? // encrypted
+  shopifyToken        String? // encrypted; static legacy token OR cached short-lived token
+  shopifyTokenExpires DateTime? // null for a static legacy token
+  lastShopifySyncAt   DateTime?
+
+  // Customer support mailbox (Gmail over IMAP/SMTP with an app password, encrypted)
+  supportEmail       String?
+  supportAppPassword String?
+  supportAutoReply   Boolean   @default(true)
+  supportSignature   String?
+  supportUidValidity String? // IMAP UIDVALIDITY of INBOX; a change means re-scan
+  supportLastUid     Int? // highest INBOX UID already imported
+  lastSupportSyncAt  DateTime?
+  supportLockUntil   DateTime? // one mail run at a time, so no email is answered twice
 
   // Meta Ads (token stored encrypted with APP_SECRET)
-  metaAdAccountId    String?
-  metaToken          String?
-  lastMetaSyncAt     DateTime?
+  metaAdAccountId String?
+  metaToken       String?
+  lastMetaSyncAt  DateTime?
 
   // Cost assumptions used when the source data has no better value
-  paymentFeePercent  Float     @default(2.9)   // % of order total (used when Shopify Payments does not report fees)
-  paymentFeeFixed    Float     @default(0.30)  // per order, in store currency
-  platformFeePercent Float     @default(0)     // Shopify's extra % when using a third-party gateway (0.5–2%)
-  defaultShippingCost Float    @default(0)     // shipping label cost per order
-  defaultHandlingCost Float    @default(0)     // pick/pack/packaging cost per order
-  defaultCogsPercent Float     @default(0)     // % of line price used when a variant has no unit cost
+  paymentFeePercent   Float @default(2.9) // % of order total (used when Shopify Payments does not report fees)
+  paymentFeeFixed     Float @default(0.30) // per order, in store currency
+  platformFeePercent  Float @default(0) // Shopify's extra % when using a third-party gateway (0.5–2%)
+  defaultShippingCost Float @default(0) // shipping label cost per order
+  defaultHandlingCost Float @default(0) // pick/pack/packaging cost per order
+  defaultCogsPercent  Float @default(0) // % of line price used when a variant has no unit cost
 
-  updatedAt          DateTime  @updatedAt
+  updatedAt DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------
@@ -91,19 +101,19 @@ model Settings {
 // ---------------------------------------------------------------------------
 
 model ProductVariant {
-  id           String   @id @default(cuid())
-  shopifyId    String   @unique
+  id           String          @id @default(cuid())
+  shopifyId    String          @unique
   productId    String?
   productTitle String
   variantTitle String?
   sku          String?
-  price        Float    @default(0)   // price in Shopify
+  price        Float           @default(0) // price in Shopify
   // Cost of goods per unit. Pulled from Shopify InventoryItem.unitCost or
   // edited by hand in the Costs page (manual edits are kept on sync).
   unitCost     Float?
-  costSource   String   @default("shopify") // "shopify" | "manual"
+  costSource   String          @default("shopify") // "shopify" | "manual"
   imageUrl     String?
-  updatedAt    DateTime @updatedAt
+  updatedAt    DateTime        @updatedAt
   lineItems    OrderLineItem[]
 }
 
@@ -114,9 +124,9 @@ model ProductVariant {
 // for `quantity` units, not per unit.
 model CostTier {
   id           String   @id @default(cuid())
-  productId    String                     // ProductVariant.productId (Shopify product gid)
-  variantId    String   @default("")      // "" = applies to all variants of the product
-  country      String   @default("")      // ISO 3166-1 alpha-2 (US, CA, AU, GB, NZ); "" = default
+  productId    String // ProductVariant.productId (Shopify product gid)
+  variantId    String   @default("") // "" = applies to all variants of the product
+  country      String   @default("") // ISO 3166-1 alpha-2 (US, CA, AU, GB, NZ); "" = default
   quantity     Int
   productCost  Float    @default(0)
   shippingCost Float    @default(0)
@@ -127,63 +137,63 @@ model CostTier {
 }
 
 model Order {
-  id              String    @id @default(cuid())
-  shopifyId       String    @unique
-  name            String                  // e.g. #1042
-  createdAt       DateTime
-  processedAt     DateTime?
-  cancelledAt     DateTime?
-  financialStatus String?
+  id                String    @id @default(cuid())
+  shopifyId         String    @unique
+  name              String // e.g. #1042
+  createdAt         DateTime
+  processedAt       DateTime?
+  cancelledAt       DateTime?
+  financialStatus   String?
   fulfillmentStatus String?
-  currency        String    @default("USD")
+  currency          String    @default("USD")
 
-  subtotal        Float     @default(0)   // line items after discounts
-  shippingCharged Float     @default(0)   // what the customer paid for shipping
-  tax             Float     @default(0)
-  discounts       Float     @default(0)
-  total           Float     @default(0)   // amount charged to the customer
-  refunded        Float     @default(0)
+  subtotal        Float @default(0) // line items after discounts
+  shippingCharged Float @default(0) // what the customer paid for shipping
+  tax             Float @default(0)
+  discounts       Float @default(0)
+  total           Float @default(0) // amount charged to the customer
+  refunded        Float @default(0)
 
   // Costs
-  cogs            Float     @default(0)
-  shippingCost    Float     @default(0)   // what you paid to ship
-  handlingCost    Float     @default(0)   // pick, pack, packaging
-  transactionFees Float     @default(0)   // payment processing (Shopify Payments / gateway)
+  cogs            Float    @default(0)
+  shippingCost    Float    @default(0) // what you paid to ship
+  handlingCost    Float    @default(0) // pick, pack, packaging
+  transactionFees Float    @default(0) // payment processing (Shopify Payments / gateway)
   // true: estimated from the fee % in Expenses (re-priced when that changes);
   // false: reported by Shopify; null: synced before this was tracked (left as is).
   feesEstimated   Boolean?
-  platformFees    Float     @default(0)   // Shopify's third-party gateway surcharge
+  platformFees    Float    @default(0) // Shopify's third-party gateway surcharge
 
-  customerId      String?
-  customerEmail   String?
-  country         String?                 // shipping country (ISO alpha-2)
-  presentmentCurrency String?             // currency the customer paid in
-  isNewCustomer   Boolean   @default(false)
-  itemCount       Int       @default(0)
-  source          String?                 // e.g. web, pos
-  tags            String?
+  customerId          String?
+  customerEmail       String?
+  country             String? // shipping country (ISO alpha-2)
+  presentmentCurrency String? // currency the customer paid in
+  isNewCustomer       Boolean @default(false)
+  itemCount           Int     @default(0)
+  source              String? // e.g. web, pos
+  tags                String?
 
-  lineItems       OrderLineItem[]
+  lineItems OrderLineItem[]
 
   @@index([createdAt])
   @@index([customerId])
 }
 
 model OrderLineItem {
-  id          String          @id @default(cuid())
-  orderId     String
-  order       Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  shopifyId   String?
-  variantId   String?
-  variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
-  title       String
-  sku         String?
-  quantity    Int             @default(1)
-  listPrice   Float           @default(0) // line total at list price, before any discount
-  price       Float           @default(0) // what the customer paid for this line after ALL discounts
-  unitCost    Float           @default(0) // supplier product cost per unit (effective)
-  shippingCost Float          @default(0) // supplier shipping for this line (total)
-  costSource  String          @default("none") // "tier" | "shopify" | "fallback" | "none"
+  id           String          @id @default(cuid())
+  orderId      String
+  order        Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shopifyId    String?
+  variantId    String?
+  variant      ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  title        String
+  sku          String?
+  quantity     Int             @default(1)
+  listPrice    Float           @default(0) // line total at list price, before any discount
+  price        Float           @default(0) // what the customer paid for this line after ALL discounts
+  unitCost     Float           @default(0) // supplier product cost per unit (effective)
+  shippingCost Float           @default(0) // supplier shipping for this line (total)
+  costSource   String          @default("none") // "tier" | "shopify" | "fallback" | "none"
 
   @@index([orderId])
   @@index([variantId])
@@ -194,32 +204,32 @@ model OrderLineItem {
 // ---------------------------------------------------------------------------
 
 model Campaign {
-  id          String       @id @default(cuid())
-  metaId      String       @unique
+  id          String      @id @default(cuid())
+  metaId      String      @unique
   name        String
-  status      String       @default("ACTIVE")
+  status      String      @default("ACTIVE")
   objective   String?
   dailyBudget Float?
-  productId   String?                     // ProductVariant.productId this campaign sells (set in the app)
-  updatedAt   DateTime     @updatedAt
+  productId   String? // ProductVariant.productId this campaign sells (set in the app)
+  updatedAt   DateTime    @updatedAt
   insights    AdInsight[]
 
   @@index([productId])
 }
 
 model AdInsight {
-  id            String   @id @default(cuid())
-  date          DateTime                  // day (UTC midnight)
-  campaignId    String
-  campaign      Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  spend         Float    @default(0)
-  impressions   Int      @default(0)
-  reach         Int      @default(0)
-  clicks        Int      @default(0)      // link clicks
-  purchases     Int      @default(0)      // platform-attributed purchases
-  purchaseValue Float    @default(0)      // platform-attributed revenue
-  addToCart     Int      @default(0)
-  initiateCheckout Int   @default(0)
+  id               String   @id @default(cuid())
+  date             DateTime // day (UTC midnight)
+  campaignId       String
+  campaign         Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  spend            Float    @default(0)
+  impressions      Int      @default(0)
+  reach            Int      @default(0)
+  clicks           Int      @default(0) // link clicks
+  purchases        Int      @default(0) // platform-attributed purchases
+  purchaseValue    Float    @default(0) // platform-attributed revenue
+  addToCart        Int      @default(0)
+  initiateCheckout Int      @default(0)
 
   @@unique([date, campaignId])
   @@index([date])
@@ -252,10 +262,72 @@ model CustomCost {
 
 model SyncLog {
   id         String    @id @default(cuid())
-  source     String                   // "shopify" | "meta"
-  status     String                   // "running" | "success" | "error"
+  source     String // "shopify" | "meta"
+  status     String // "running" | "success" | "error"
   message    String?
   records    Int       @default(0)
   startedAt  DateTime  @default(now())
   finishedAt DateTime?
+}
+
+// ---------------------------------------------------------------------------
+// Customer support (Support inbox, AI replies, knowledge base)
+// ---------------------------------------------------------------------------
+
+model SupportThread {
+  id            String           @id @default(cuid())
+  key           String           @unique // Gmail thread id, or the first message's Message-ID
+  subject       String
+  customerEmail String
+  customerName  String?
+  // pending: not sorted yet; customer: a real customer or shopper; other: spam, pitches, newsletters, notifications
+  category      String           @default("pending")
+  topic         String? // KbArticle.key the AI matched
+  // new | auto_replied | needs_reply | needs_action | replied | done
+  status        String           @default("new")
+  summary       String? // one line: what the customer wants
+  holdReason    String? // why the AI did not send on its own
+  actionNote    String? // what a person has to do (process refund, change address)
+  draft         String? // reply waiting for a person
+  orderNames    String? // "#LW001289, #LW001290"
+  unread        Boolean          @default(true)
+  lastMessageAt DateTime
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  messages      SupportMessage[]
+
+  @@index([category, status, lastMessageAt])
+  @@index([customerEmail])
+}
+
+model SupportMessage {
+  id          String        @id @default(cuid())
+  threadId    String
+  thread      SupportThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  messageId   String        @unique // RFC 5322 Message-ID
+  references  String? // Message-IDs this one replies to, for threading
+  direction   String // "in" (from the customer) | "out" (our reply)
+  fromEmail   String
+  fromName    String?
+  toEmail     String
+  subject     String
+  text        String
+  sentAt      DateTime
+  sentBy      String? // "AI" or the team member's name, for "out"
+  processedAt DateTime? // when the AI handled this inbound message
+  createdAt   DateTime      @default(now())
+
+  @@index([threadId, sentAt])
+}
+
+model KbArticle {
+  id          String   @id @default(cuid())
+  key         String   @unique // stable id the AI answers with, e.g. "refund_return"
+  title       String // "Refunds and returns"
+  whenToUse   String // which customer questions this answers
+  answer      String // the facts and the structure of the reply
+  autoSend    Boolean  @default(true) // the AI may send this reply on its own
+  flagForTeam Boolean  @default(false) // someone must also act (refund, address change)
+  sortOrder   Int      @default(0)
+  updatedAt   DateTime @updatedAt
 }

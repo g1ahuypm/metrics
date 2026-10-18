@@ -37,3 +37,25 @@ export async function maybeAutoSync(): Promise<void> {
     }
   });
 }
+
+const SUPPORT_STALE_MS = 2 * 60 * 1000;
+
+/** Opening the Support inbox checks for new mail when the last check is over two minutes old. */
+export async function maybeCheckSupport(): Promise<void> {
+  const s = await db.settings.findUnique({
+    where: { id: "default" },
+    select: { supportEmail: true, supportAppPassword: true, lastSupportSyncAt: true, supportLockUntil: true },
+  });
+  if (!s?.supportEmail || !s.supportAppPassword) return;
+  const now = Date.now();
+  if (s.lastSupportSyncAt && now - s.lastSupportSyncAt.getTime() < SUPPORT_STALE_MS) return;
+  if (s.supportLockUntil && s.supportLockUntil.getTime() > now) return;
+  after(async () => {
+    try {
+      const { runSupport } = await import("./support/run");
+      await runSupport();
+    } catch (err) {
+      console.error("support check failed", err);
+    }
+  });
+}

@@ -5,6 +5,8 @@ import { fmtDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
 import { GeneralSettingsForm, IntegrationCard, PasswordForm } from "./SettingsClient";
 import { decrypt, mask } from "@/lib/crypto";
+import { DEFAULT_SIGNATURE } from "@/lib/support/knowledge";
+import { SupportSettingsCard } from "@/components/support/SupportSettingsCard";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ welcome?: string }> }) {
   await requireEditor();
@@ -73,6 +75,18 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             "Generate a token with the ads_read permission (system-user tokens do not expire).",
             "Find the ad account ID in Ads Manager (the number after act= in the URL).",
           ]}
+        />
+      </div>
+
+      <div className="mt-6">
+        <SupportSettingsCard
+          email={settings.supportEmail}
+          connected={Boolean(settings.supportEmail && settings.supportAppPassword)}
+          autoReply={settings.supportAutoReply}
+          signature={settings.supportSignature}
+          defaultSignature={DEFAULT_SIGNATURE}
+          aiReady={Boolean(process.env.ANTHROPIC_API_KEY)}
+          lastCheck={fmtDateTime(settings.lastSupportSyncAt)}
         />
       </div>
 

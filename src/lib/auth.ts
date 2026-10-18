@@ -8,11 +8,11 @@ import { db } from "./db";
 export const SESSION_COOKIE = "pd_session";
 const SESSION_DAYS = 30;
 
-import { canEdit, ROLE_LABELS, type Role, type SessionUser } from "./auth-shared";
+import { canEdit, canSupport, ROLE_LABELS, type Role, type SessionUser } from "./auth-shared";
 
-export { canEdit, ROLE_LABELS };
+export { canEdit, canSupport, ROLE_LABELS };
 export type { Role, SessionUser };
-export const ROLES: Role[] = ["OWNER", "ADMIN", "PARTNER"];
+export const ROLES: Role[] = ["OWNER", "ADMIN", "PARTNER", "SUPPORT"];
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
@@ -59,10 +59,24 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   return { id: user.id, email: user.email, name: user.name, role: user.role as Role };
 }
 
-/** Redirects to /login when there is no valid session. */
-export async function requireUser(): Promise<SessionUser> {
+/** Signed in, any role. Support staff only ever see the Support pages. */
+export async function requireSignedIn(): Promise<SessionUser> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  return user;
+}
+
+/** Redirects to /login when there is no valid session; Support staff go to their inbox. */
+export async function requireUser(): Promise<SessionUser> {
+  const user = await requireSignedIn();
+  if (user.role === "SUPPORT") redirect("/support");
+  return user;
+}
+
+/** The Support inbox and knowledge base: owner, admins and support staff. */
+export async function requireSupport(): Promise<SessionUser> {
+  const user = await requireSignedIn();
+  if (!canSupport(user.role)) redirect("/dashboard?denied=1");
   return user;
 }
 

@@ -20,11 +20,15 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.3",
     "date-fns": "^4.1.0",
+    "imapflow": "^2.5.4",
     "lucide-react": "^0.475.0",
+    "mailparser": "^3.9.45",
     "next": "^15.5.25",
+    "nodemailer": "^10.1.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "recharts": "^3.1.0",
@@ -32,7 +36,9 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",
+    "@types/mailparser": "^3.9.0",
     "@types/node": "^22.10.0",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "prisma": "^6.19.3",

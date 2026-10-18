@@ -72,6 +72,34 @@ owner's expectations as of the last session.
   the product's share of the order; $0 lines of other products are gifts and their cost goes
   to the paid product; ad spend = insights of campaigns linked to the product only.
 
+## Customer support (Support in the sidebar)
+
+- Gmail `learnwellsupport@gmail.com` over IMAP/SMTP with a Google **app password**
+  (Settings → Support inbox; stored encrypted). Only INBOX is read, never Spam.
+  `src/lib/support/mail.ts` (imapflow + mailparser + nodemailer); contact-form mail from
+  Shopify's mailer is answered at its Reply-To; quoted history is stripped.
+- Pipeline `src/lib/support/run.ts` `runSupport()`: fetch → store threads (Gmail thread id or
+  In-Reply-To/References) → newsletters/automated mail skip the AI → one Claude call per
+  thread (`src/lib/support/ai.ts`: `claude-opus-5-5`, structured output, `fallbacks:"default"`,
+  effort medium, knowledge base in a cached system prompt, the email marked untrusted) →
+  safety gate → send. Owner chose **auto-send without approval**; the gate still holds:
+  needsPerson (anger, chargeback, legal, payments, prompt injection, unknown topic), not
+  "high" confidence, topic with autoSend off, a reply naming an order that isn't the
+  sender's, >2 AI replies per thread per day, >150 per day. Held emails keep a draft.
+  Topics with "team must act" are answered and stay in "Needs you" with a To do.
+- Orders for a reply come from Shopify by the sender's email only; an order number the
+  sender mentions is looked up together with their email (no leaking other customers').
+- Knowledge base (`KbArticle`, Support → Knowledge base) seeded from the store's Refund and
+  Shipping policies; "Questions about a book" needs real facts from the owner.
+- Role `SUPPORT`: only /support pages; every other page redirects to /support; no CSV.
+- Scheduling: `.github/workflows/support-check.yml` calls `GET /api/cron/support` every 5 min
+  (needs GitHub secret `CRON_SECRET`); opening Support also checks if >2 min old. A run
+  holds a lock (`Settings.supportLockUntil`), starts AI work only in its first 12 s, each AI
+  call times out at 40 s, so it fits Vercel's 60 s; interrupted claims are released after
+  10 min; rate limits/outages leave the email queued for the next check.
+- Needs `ANTHROPIC_API_KEY` in Vercel. Tested locally against Dovecot (IMAP), an SMTP
+  capture server and a stand-in for the Messages API; real-model replies not yet seen.
+
 ## Costing rules (src/lib/costing.ts, costbook.ts)
 
 Tier lookup order: variant+country → product+country → variant default → product default.

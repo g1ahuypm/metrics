@@ -12,7 +12,7 @@ export async function createInviteAction(_prev: FormState, formData: FormData): 
   const parsed = z
     .object({
       email: z.union([z.literal(""), z.string().trim().toLowerCase().email("Enter a valid email")]),
-      role: z.enum(["ADMIN", "PARTNER"]),
+      role: z.enum(["ADMIN", "PARTNER", "SUPPORT"]),
     })
     .safeParse({ email: formData.get("email") ?? "", role: formData.get("role") });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
@@ -29,7 +29,7 @@ export async function createInviteAction(_prev: FormState, formData: FormData): 
     },
   });
   revalidatePath("/team");
-  return { success: "Invite link created. Copy it and send it to your partner." };
+  return { success: "Invite link created. Copy it and send it to them." };
 }
 
 export async function revokeInviteAction(id: string): Promise<void> {

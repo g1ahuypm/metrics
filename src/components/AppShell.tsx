@@ -3,10 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, LogOut, Megaphone, Menu, Package, Receipt, Settings, ShoppingBag, Users, X } from "lucide-react";
+import { LayoutDashboard, LifeBuoy, LogOut, Megaphone, Menu, Package, Receipt, Settings, ShoppingBag, Users, X } from "lucide-react";
 import { Logo } from "./Logo";
 import { logoutAction } from "@/lib/actions/auth";
-import { canEdit, ROLE_LABELS, type SessionUser } from "@/lib/auth-shared";
+import { canEdit, canSupport, ROLE_LABELS, type SessionUser } from "@/lib/auth-shared";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -15,15 +15,28 @@ const NAV = [
   { href: "/ads", label: "Meta Ads", icon: Megaphone },
 ];
 
+const SUPPORT = { href: "/support", label: "Support", icon: LifeBuoy };
+
 const SETUP = [
   { href: "/expenses", label: "Expenses & fees", icon: Receipt },
   { href: "/team", label: "Team", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings, editorOnly: true },
 ];
 
-export function AppShell({ user, storeName, children }: { user: SessionUser; storeName: string; children: React.ReactNode }) {
+export function AppShell({
+  user,
+  storeName,
+  supportCount,
+  children,
+}: {
+  user: SessionUser;
+  storeName: string;
+  supportCount: number;
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const supportOnly = user.role === "SUPPORT";
   const setup = SETUP.filter((n) => !n.editorOnly || canEdit(user.role));
 
   const link = ({ href, label, icon: Icon }: (typeof NAV)[number]) => {
@@ -39,13 +52,19 @@ export function AppShell({ user, storeName, children }: { user: SessionUser; sto
       >
         <Icon className="h-4 w-4" />
         {label}
+        {href === "/support" && supportCount > 0 && (
+          <span className="ml-auto rounded-full bg-warn/20 px-1.5 text-[11px] font-semibold text-warn-text">{supportCount}</span>
+        )}
       </Link>
     );
   };
 
-  const nav = (
+  const nav = supportOnly ? (
+    <nav className="flex flex-col gap-1">{link(SUPPORT)}</nav>
+  ) : (
     <nav className="flex flex-col gap-1">
       {NAV.map(link)}
+      {canSupport(user.role) && link(SUPPORT)}
       <div className="mt-5 mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-ink-3">Setup</div>
       {setup.map(link)}
     </nav>

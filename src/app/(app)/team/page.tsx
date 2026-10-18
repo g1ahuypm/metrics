@@ -82,6 +82,10 @@ export default async function TeamPage() {
                 <dt className="font-medium">{ROLE_LABELS.PARTNER}</dt>
                 <dd className="text-ink-2">Sees every report and cost, cannot change anything.</dd>
               </div>
+              <div>
+                <dt className="font-medium">{ROLE_LABELS.SUPPORT}</dt>
+                <dd className="text-ink-2">Answers customer emails in Support. Sees no profit numbers.</dd>
+              </div>
             </dl>
           </div>
         </div>

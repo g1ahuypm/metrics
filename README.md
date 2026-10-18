@@ -172,3 +172,24 @@ This starts Postgres, the dashboard on port 3000, and an hourly sync. Put a reve
 | `npm run db:seed` | Seed owner and demo data |
 | `npm run db:studio` | Browse the database |
 | `npm run typecheck` | TypeScript check |
+
+## Customer support inbox
+
+Support (sidebar) shows the support Gmail inside the dashboard. New emails are sorted
+(customers vs spam, pitches, newsletters), answered by Claude from the Knowledge base and
+the customer's Shopify order, and sent from the support address. Angry customers,
+chargebacks, unclear or unusual emails, and topics marked "Person answers" wait for the team
+with a draft ready. Team members with the **Support** role see only this inbox.
+
+Setup:
+
+1. Settings → Support inbox: the Gmail address and a Google **app password**
+   (myaccount.google.com/apppasswords, needs 2-Step Verification).
+2. Vercel environment variable `ANTHROPIC_API_KEY` (console.anthropic.com → API keys).
+3. GitHub repository secret `CRON_SECRET` (same value as in Vercel) so
+   `.github/workflows/support-check.yml` calls `GET /api/cron/support` every 5 minutes.
+   Opening the Support page also checks when the last check is over 2 minutes old.
+
+Optional for other providers or testing: `SUPPORT_IMAP_HOST/PORT/SECURE`,
+`SUPPORT_SMTP_HOST/PORT/SECURE` (defaults: Gmail, 993/465 with TLS).
+

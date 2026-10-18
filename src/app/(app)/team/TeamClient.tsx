@@ -20,6 +20,7 @@ export function InviteForm({ isOwner }: { isOwner: boolean }) {
         <label className="label">Role</label>
         <select name="role" className="input" defaultValue="PARTNER">
           <option value="PARTNER">{ROLE_LABELS.PARTNER}</option>
+          <option value="SUPPORT">{ROLE_LABELS.SUPPORT}</option>
           {isOwner && <option value="ADMIN">{ROLE_LABELS.ADMIN}</option>}
         </select>
       </div>
@@ -104,6 +105,7 @@ export function MemberRow({
             }
           >
             <option value="PARTNER">{ROLE_LABELS.PARTNER}</option>
+            <option value="SUPPORT">{ROLE_LABELS.SUPPORT}</option>
             {me.role === "OWNER" && <option value="ADMIN">{ROLE_LABELS.ADMIN}</option>}
           </select>
         ) : (
