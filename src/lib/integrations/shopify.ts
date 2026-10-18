@@ -37,7 +37,8 @@ type ShopifyOrder = {
       title: string;
       sku: string | null;
       quantity: number;
-      discountedTotalSet: Money;
+      originalTotalSet: Money;
+      discountAllocations: { allocatedAmountSet: Money }[];
       variant: { id: string; inventoryItem: { unitCost: { amount: string } | null } | null } | null;
     }[];
   };
@@ -202,7 +203,8 @@ query Orders($cursor: String, $query: String) {
       lineItems(first: 100) {
         nodes {
           id title sku quantity
-          discountedTotalSet { shopMoney { amount } }
+          originalTotalSet { shopMoney { amount } }
+          discountAllocations { allocatedAmountSet { shopMoney { amount } } }
           variant { id inventoryItem { unitCost { amount } } }
         }
       }
@@ -288,12 +290,16 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
         }
       }
       const country = o.shippingAddress?.countryCodeV2 ?? countryFromCurrency(o.presentmentCurrencyCode) ?? null;
+      // Shopify's discountedTotalSet leaves out order-level discounts (e.g. "Buy 2"
+      // automatic discounts), so compute what the customer really paid per line.
+      const netLine = (li: ShopifyOrder["lineItems"]["nodes"][number]) =>
+        Math.max(0, Math.round((num(li.originalTotalSet) - li.discountAllocations.reduce((s, a) => s + num(a.allocatedAmountSet), 0)) * 100) / 100);
       const costed = costOrder(
         book,
         o.lineItems.nodes.map((li) => ({
           variantShopifyId: li.variant?.id ?? null,
           quantity: li.quantity,
-          price: num(li.discountedTotalSet),
+          price: netLine(li),
         })),
         cfg.defaultShippingCost,
         country,
@@ -304,7 +310,8 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
         title: li.title,
         sku: li.sku,
         quantity: li.quantity,
-        price: num(li.discountedTotalSet),
+        listPrice: num(li.originalTotalSet),
+        price: netLine(li),
         unitCost: costed.lines[i].unitCost,
         shippingCost: costed.lines[i].shippingCost,
         costSource: costed.lines[i].source,

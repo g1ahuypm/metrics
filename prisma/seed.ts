@@ -36,6 +36,9 @@ const PRODUCTS = [
   { product: "Insulated Bottle 750ml", variants: ["Steel", "Forest"], price: 45, weight: 3, tiers: [[1, 8.7, 3.8], [2, 17.4, 5.3]] },
   { product: "Weekender Bag", variants: ["Olive", "Charcoal"], price: 149, weight: 1.5, tiers: [[1, 41.5, 10.5], [2, 83, 14]], countries: { AU: [[1, 41.5, 19.9]], GB: [[1, 41.5, 16.4]] } },
   { product: "Wool Beanie", variants: ["Oat", "Navy"], price: 29, weight: 2.5, tiers: [[1, 4.3, 2.5], [2, 8.6, 3.1], [3, 12.9, 3.6]] },
+  // Offer-style product: listed at 84.99, "Buy 1" pays 59.99, "Buy 2" pays 84.95 and includes the free gift below.
+  { product: "Winnie the Pooh: The Complete Stories", variants: ["Default Title"], price: 84.99, weight: 4, tiers: [[1, 11.2, 4.9], [2, 22.4, 6.4]], offer: { 1: 59.99, 2: 84.95, gift: "Hundred Acre Wood Puzzle Packet" } },
+  { product: "Hundred Acre Wood Puzzle Packet", variants: ["Default Title"], price: 19.99, weight: 0, tiers: [[1, 0, 0]] },
 ];
 
 // Where orders ship: weights for the "big five" markets
@@ -200,6 +203,18 @@ async function seedDemoData() {
       const lines: { variantId: string; shopifyId: string; title: string; sku: string; quantity: number; price: number; listPrice: number }[] = [];
       for (let l = 0; l < lineCount; l++) {
         const v = weightedVariant();
+        const def = PRODUCTS.find((p) => v.title.startsWith(p.product)) as (typeof PRODUCTS)[number] & { offer?: Record<number, number> & { gift?: string } };
+        if (def?.offer) {
+          // Offer products are sold alone: Buy 1 or Buy 2 (+ free gift)
+          const qty = rand() < 0.7 ? 1 : 2;
+          lines.length = 0;
+          lines.push({ variantId: v.id, shopifyId: v.shopifyId, title: v.title, sku: v.sku, quantity: qty, price: def.offer[qty], listPrice: round2(v.price * qty) });
+          if (qty === 2 && def.offer.gift) {
+            const g = variants.find((x) => x.title.startsWith(def.offer!.gift!))!;
+            lines.push({ variantId: g.id, shopifyId: g.shopifyId, title: g.title, sku: g.sku, quantity: 1, price: 0, listPrice: g.price });
+          }
+          break;
+        }
         const qty = rand() < 0.8 ? 1 : rand() < 0.8 ? 2 : 3;
         const discount = promo > 1 ? 0.8 : rand() < 0.15 ? 0.9 : 1;
         lines.push({ variantId: v.id, shopifyId: v.shopifyId, title: v.title, sku: v.sku, quantity: qty, price: round2(v.price * qty * discount), listPrice: round2(v.price * qty) });
@@ -207,6 +222,7 @@ async function seedDemoData() {
       const country = pickCountry();
       const costed = costOrder(book, lines.map((l) => ({ variantShopifyId: l.shopifyId, quantity: l.quantity, price: l.price })), 6.5, country);
       const subtotal = round2(lines.reduce((s, l) => s + l.price, 0));
+      if (subtotal === 0) continue;
       const listTotal = lines.reduce((s, l) => s + l.quantity, 0);
       const shippingCharged = subtotal >= 75 ? 0 : 6.95;
       const tax = round2(subtotal * 0.07);
@@ -245,7 +261,7 @@ async function seedDemoData() {
           itemCount: listTotal,
           source: rand() < 0.9 ? "web" : "shopify_draft_order",
           lineItems: {
-            create: lines.map(({ listPrice: _listPrice, shopifyId: _sid, ...l }, i) => ({
+            create: lines.map(({ shopifyId: _sid, ...l }, i) => ({
               ...l,
               unitCost: costed.lines[i].unitCost,
               shippingCost: costed.lines[i].shippingCost,

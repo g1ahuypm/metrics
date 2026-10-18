@@ -121,6 +121,7 @@ model CostTier {
   quantity     Int
   productCost  Float    @default(0)
   shippingCost Float    @default(0)
+  sellPrice    Float?                     // what this bundle sells for, if you want to override the observed average
   updatedAt    DateTime @updatedAt
 
   @@unique([productId, variantId, country, quantity])
@@ -177,7 +178,8 @@ model OrderLineItem {
   title       String
   sku         String?
   quantity    Int             @default(1)
-  price       Float           @default(0) // discounted line total
+  listPrice   Float           @default(0) // line total at list price, before any discount
+  price       Float           @default(0) // what the customer paid for this line after ALL discounts
   unitCost    Float           @default(0) // supplier product cost per unit (effective)
   shippingCost Float          @default(0) // supplier shipping for this line (total)
   costSource  String          @default("none") // "tier" | "shopify" | "fallback" | "none"

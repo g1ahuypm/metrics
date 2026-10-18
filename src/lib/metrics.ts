@@ -187,23 +187,27 @@ async function loadOrderSlices(from: Date, toEnd: Date, productId?: string): Pro
     where: { createdAt: { gte: from, lte: toEnd }, cancelledAt: null, lineItems: { some: { variant: { productId } } } },
     select: {
       ...orderSelect,
-      lineItems: { select: { price: true, quantity: true, unitCost: true, shippingCost: true, costSource: true, variant: { select: { productId: true } } } },
+      lineItems: { select: { price: true, listPrice: true, quantity: true, unitCost: true, shippingCost: true, costSource: true, variant: { select: { productId: true } } } },
     },
   });
   return orders.map((o) => {
     const mine = o.lineItems.filter((li) => li.variant?.productId === productId);
     const minePrice = mine.reduce((s, li) => s + li.price, 0);
+    // Free gifts ($0 lines of other products) belong to whatever was paid for in the order.
+    const gifts = o.lineItems.filter((li) => li.variant?.productId !== productId && li.price === 0);
     const share = o.subtotal > 0 ? minePrice / o.subtotal : o.lineItems.length ? mine.length / o.lineItems.length : 0;
     const tiered = o.lineItems.some((li) => li.costSource === "tier");
+    const giftCogs = gifts.reduce((s, li) => s + li.unitCost * li.quantity, 0) * share;
+    const giftShipping = gifts.reduce((s, li) => s + li.shippingCost, 0) * share;
     return {
       createdAt: o.createdAt,
-      grossSales: minePrice + o.discounts * share,
-      discounts: o.discounts * share,
+      grossSales: mine.reduce((s, li) => s + li.listPrice, 0),
+      discounts: mine.reduce((s, li) => s + (li.listPrice - li.price), 0),
       refunds: o.refunded * share,
       shippingCharged: o.shippingCharged * share,
       tax: o.tax * share,
-      cogs: mine.reduce((s, li) => s + li.unitCost * li.quantity, 0),
-      shippingCost: tiered ? mine.reduce((s, li) => s + li.shippingCost, 0) : o.shippingCost * share,
+      cogs: mine.reduce((s, li) => s + li.unitCost * li.quantity, 0) + giftCogs,
+      shippingCost: (tiered ? mine.reduce((s, li) => s + li.shippingCost, 0) : o.shippingCost * share) + giftShipping,
       handlingCost: o.handlingCost * share,
       paymentFees: o.transactionFees * share,
       platformFees: o.platformFees * share,

@@ -1,13 +1,15 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, Info, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Undo2 } from "lucide-react";
-import { clearVariantTiersAction, recostOrdersAction, saveTiersAction, setSellingPriceAction, type TierInput } from "@/lib/actions/costs";
+import { Check, ChevronDown, ChevronRight, Copy, Gift, Info, Loader2, Plus, RefreshCw, Search, Trash2, Undo2 } from "lucide-react";
+import { clearVariantTiersAction, recostOrdersAction, saveTiersAction, type TierInput } from "@/lib/actions/costs";
 import { resolveTier } from "@/lib/costing";
 import { MARKETS, marketLabel } from "@/lib/constants";
 import { fmtMoney, fmtNumber, fmtPercent, safeDiv } from "@/lib/format";
 
-export type TierRow = { quantity: number; productCost: number; shippingCost: number };
+export type TierRow = { quantity: number; productCost: number; shippingCost: number; sellPrice: number | null };
+/** Observed average net price per bundle size, from real orders. */
+export type SoldPrices = Record<number, { avg: number; count: number }>;
 /** Tiers keyed by country code; "" is the default used for any other country. */
 export type TiersByCountry = Record<string, TierRow[]>;
 
@@ -16,9 +18,7 @@ export type VariantCostData = {
   shopifyId: string;
   title: string;
   sku: string | null;
-  price: number; // effective selling price (override or Shopify)
-  shopifyPrice: number;
-  priceOverride: number | null;
+  price: number; // Shopify list price
   shopifyUnitCost: number | null;
   unitsSold: number;
   quantitiesBought: number[];
@@ -32,6 +32,8 @@ export type ProductCostData = {
   tiers: TiersByCountry;
   unitsByCountry: Record<string, number>;
   variants: VariantCostData[];
+  soldPrices: SoldPrices;
+  isFreeGift: boolean;
 };
 
 const hasAny = (t: TiersByCountry) => Object.values(t).some((x) => x.length > 0);
@@ -189,21 +191,29 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
           <div className="min-w-0">
             <h3 className="truncate text-sm font-semibold">{product.title}</h3>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
-              <span className={`badge ${status.tone}`}>{status.label}</span>
-              <PriceEditor
-                productId={product.productId}
-                variantId=""
-                price={price}
-                shopifyPrice={product.variants[0]?.shopifyPrice ?? 0}
-                overridden={product.variants.some((v) => v.priceOverride !== null)}
-                currency={currency}
-                editor={editor}
-              />
+              {product.isFreeGift ? (
+                <span className="badge text-accent">
+                  <Gift className="h-3 w-3" /> Free gift
+                </span>
+              ) : (
+                <span className={`badge ${status.tone}`}>{status.label}</span>
+              )}
+              <span>List {fmtMoney(price, currency)}</span>
+              {product.soldPrices[1] && !product.isFreeGift && (
+                <span title={`Average paid for a single unit across ${product.soldPrices[1].count} orders`}>
+                  Sells at {fmtMoney(product.soldPrices[1].avg, currency)}
+                </span>
+              )}
               <span>{product.variants.length} variant{product.variants.length === 1 ? "" : "s"}</span>
               <span>{fmtNumber(units)} units sold</span>
               {countriesSet.length > 0 && <span>Country costs: {countriesSet.join(", ")}</span>}
               {shopifyCost !== null && <span>Shopify cost per item {fmtMoney(shopifyCost, currency)}</span>}
             </div>
+            {product.isFreeGift && (
+              <p className="mt-1 text-xs text-ink-3">
+                Always given away at $0 in orders. Its cost is charged to the paid product in the same order, so enter what it costs you below (or mark it no cost).
+              </p>
+            )}
           </div>
         </div>
         <button type="button" className="btn-ghost text-xs" onClick={() => setShowVariants((v) => !v)}>
@@ -227,6 +237,7 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
           initial={currentTiers}
           template={fallback}
           price={price}
+          soldPrices={product.soldPrices}
           currency={currency}
           editor={editor}
           quantitiesBought={quantitiesBought}
@@ -269,9 +280,7 @@ function VariantSection({
           <span className="font-medium">{variant.title}</span>
           {variant.sku && <span className="ml-2 text-xs text-ink-3">{variant.sku}</span>}
           <span className="ml-2 text-xs text-ink-3">{fmtNumber(variant.unitsSold)} sold</span>
-          <span className="ml-2 inline-flex text-xs text-ink-3">
-            <PriceEditor productId={product.productId} variantId={variant.shopifyId} price={variant.price} shopifyPrice={variant.shopifyPrice} overridden={variant.priceOverride !== null} currency={currency} editor={editor} />
-          </span>
+          <span className="ml-2 text-xs text-ink-3">List {fmtMoney(variant.price, currency)}</span>
         </div>
         {editor && !customizing && (
           <button type="button" className="btn-ghost text-xs" onClick={() => setCustomizing(true)}>
@@ -304,6 +313,7 @@ function VariantSection({
             initial={own}
             template={template}
             price={variant.price}
+            soldPrices={product.soldPrices}
             currency={currency}
             editor={editor}
             quantitiesBought={variant.quantitiesBought}
@@ -326,6 +336,7 @@ function TierEditor({
   initial,
   template,
   price,
+  soldPrices,
   currency,
   editor,
   quantitiesBought,
@@ -338,21 +349,38 @@ function TierEditor({
   /** Tiers this editor falls back to while empty (default costs); offered as a starting point. */
   template: TierRow[];
   price: number;
+  soldPrices: SoldPrices;
   currency: string;
   editor: boolean;
   quantitiesBought: number[];
   heading: string;
 }) {
-  const toRows = (t: TierRow[]) => t.map((x) => ({ quantity: String(x.quantity), productCost: String(x.productCost), shippingCost: String(x.shippingCost) }));
-  const [rows, setRows] = useState(() => (initial.length ? toRows(initial) : [{ quantity: "1", productCost: "", shippingCost: "" }]));
+  const toRows = (t: TierRow[]) =>
+    t.map((x) => ({ quantity: String(x.quantity), productCost: String(x.productCost), shippingCost: String(x.shippingCost), sellPrice: x.sellPrice === null ? "" : String(x.sellPrice) }));
+  const blank = { quantity: "1", productCost: "", shippingCost: "", sellPrice: "" };
+  const [rows, setRows] = useState(() => (initial.length ? toRows(initial) : [blank]));
   const [saved, setSaved] = useState<TierRow[]>(initial);
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const parsed: TierInput[] = rows
-    .map((r) => ({ quantity: Number(r.quantity), productCost: Number(r.productCost || 0), shippingCost: Number(r.shippingCost || 0) }))
+    .map((r) => ({
+      quantity: Number(r.quantity),
+      productCost: Number(r.productCost || 0),
+      shippingCost: Number(r.shippingCost || 0),
+      sellPrice: r.sellPrice === "" ? null : Number(r.sellPrice),
+    }))
     .filter((r) => Number.isInteger(r.quantity) && r.quantity > 0);
-  const dirty = JSON.stringify(parsed) !== JSON.stringify(saved.map((t) => ({ quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost })));
+  const dirty =
+    JSON.stringify(parsed) !==
+    JSON.stringify(saved.map((t) => ({ quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost, sellPrice: t.sellPrice })));
+  /** What a bundle of q units sells for: your override, else the average from orders, else list price × q. */
+  const sellsFor = (q: number, override: string) => {
+    if (override !== "") return { value: Number(override), source: "override" as const };
+    const obs = soldPrices[q];
+    if (obs && obs.count > 0) return { value: obs.avg, source: "orders" as const };
+    return { value: price * q, source: "list" as const };
+  };
   const nextQty = (Math.max(0, ...parsed.map((r) => r.quantity)) || 0) + 1;
   const unlisted = quantitiesBought.filter((q) => !parsed.some((r) => r.quantity === q));
   const usingFallback = saved.length === 0 && template.length > 0;
@@ -366,7 +394,7 @@ function TierEditor({
       const r = await saveTiersAction(productId, variantId, parsed, country);
       if (r?.error) setMsg({ ok: false, text: r.error });
       else {
-        setSaved(parsed);
+        setSaved(parsed.map((t) => ({ ...t, sellPrice: t.sellPrice ?? null })));
         setMsg({ ok: true, text: r?.success ?? "Saved" });
         setTimeout(() => setMsg(null), 2000);
       }
@@ -403,6 +431,7 @@ function TierEditor({
               <th className="py-1 pr-3 text-right font-medium">Total cost</th>
               <th className="py-1 pr-3 text-right font-medium">Per unit</th>
               <th className="py-1 pr-3 text-right font-medium">Sells for</th>
+              <th className="py-1 pr-3 text-right font-medium">Profit</th>
               <th className="py-1 pr-3 text-right font-medium">Margin</th>
               {editor && <th className="py-1"></th>}
             </tr>
@@ -411,7 +440,9 @@ function TierEditor({
             {rows.map((r, i) => {
               const q = Number(r.quantity) || 0;
               const total = Number(r.productCost || 0) + Number(r.shippingCost || 0);
-              const sells = price * q;
+              const sf = sellsFor(q, r.sellPrice);
+              const sells = sf.value;
+              const obs = soldPrices[q];
               const margin = safeDiv(sells - total, sells);
               return (
                 <tr key={i} className="border-t border-border">
@@ -429,7 +460,23 @@ function TierEditor({
                   </td>
                   <td className="py-1.5 pr-3 text-right tnum font-medium">{fmtMoney(total, currency)}</td>
                   <td className="py-1.5 pr-3 text-right tnum text-ink-2">{q > 0 ? fmtMoney(total / q, currency) : "—"}</td>
-                  <td className="py-1.5 pr-3 text-right tnum text-ink-2">{fmtMoney(sells, currency)}</td>
+                  <td className="py-1.5 pr-3 text-right">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="input w-28 py-1 text-right tnum"
+                      placeholder={sf.source === "orders" ? String(obs?.avg ?? "") : String(price * q)}
+                      value={r.sellPrice}
+                      readOnly={!editor}
+                      onChange={(e) => update(i, "sellPrice", e.target.value)}
+                      title={sf.source === "orders" ? `Average paid across ${obs?.count} orders. Type a price to override.` : "No orders at this quantity yet; list price shown. Type what it sells for."}
+                    />
+                    <div className="mt-0.5 text-[10px] text-ink-3">
+                      {sf.source === "override" ? `your price · orders avg ${obs ? fmtMoney(obs.avg, currency) : "n/a"}` : sf.source === "orders" ? `avg of ${obs?.count} orders` : "list price"}
+                    </div>
+                  </td>
+                  <td className={`py-1.5 pr-3 text-right tnum font-medium ${sells - total < 0 ? "text-bad-text" : ""}`}>{fmtMoney(sells - total, currency)}</td>
                   <td className={`py-1.5 pr-3 text-right tnum ${margin < 0.3 && sells > 0 ? "text-warn-text" : ""}`}>{sells > 0 ? fmtPercent(margin, 0) : "—"}</td>
                   {editor && (
                     <td className="py-1.5 text-right">
@@ -446,7 +493,7 @@ function TierEditor({
       </div>
       {editor && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button type="button" className="btn-ghost text-xs" onClick={() => setRows((rs) => [...rs, { quantity: String(nextQty), productCost: "", shippingCost: "" }])}>
+          <button type="button" className="btn-ghost text-xs" onClick={() => setRows((rs) => [...rs, { ...blank, quantity: String(nextQty) }])}>
             <Plus className="h-3.5 w-3.5" /> Add qty {nextQty}
           </button>
           {saved.length === 0 && country === "" && (
@@ -457,7 +504,7 @@ function TierEditor({
               title="Digital downloads, free bonuses, gifts"
               onClick={() =>
                 start(async () => {
-                  const zero = [{ quantity: 1, productCost: 0, shippingCost: 0 }];
+                  const zero = [{ quantity: 1, productCost: 0, shippingCost: 0, sellPrice: null }];
                   const r = await saveTiersAction(productId, variantId, zero, country);
                   if (r?.error) setMsg({ ok: false, text: r.error });
                   else {
@@ -489,7 +536,7 @@ function TierEditor({
                   if (r?.error) setMsg({ ok: false, text: r.error });
                   else {
                     setSaved([]);
-                    setRows([{ quantity: "1", productCost: "", shippingCost: "" }]);
+                    setRows([blank]);
                     setMsg({ ok: true, text: "Back to default costs" });
                     setTimeout(() => setMsg(null), 2000);
                   }
@@ -514,80 +561,3 @@ function estimate(tiers: TierInput[], quantity: number): number {
   return r ? r.productCost + r.shippingCost : 0;
 }
 
-// ---------------------------------------------------------------------------
-
-/** "Sells for" with an inline edit so margins use the price you really charge. */
-function PriceEditor({
-  productId,
-  variantId,
-  price,
-  shopifyPrice,
-  overridden,
-  currency,
-  editor,
-}: {
-  productId: string;
-  variantId: string;
-  price: number;
-  shopifyPrice: number;
-  overridden: boolean;
-  currency: string;
-  editor: boolean;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(String(price));
-  const [pending, start] = useTransition();
-  const [err, setErr] = useState<string | null>(null);
-
-  function save(next: number | null) {
-    start(async () => {
-      const r = await setSellingPriceAction(productId, variantId, next);
-      if (r?.error) setErr(r.error);
-      else {
-        setErr(null);
-        setEditing(false);
-      }
-    });
-  }
-
-  if (!editor) return <span>Sells for {fmtMoney(price, currency)}</span>;
-  if (!editing) {
-    return (
-      <button type="button" className="inline-flex items-center gap-1 hover:text-ink" onClick={() => { setValue(String(price)); setEditing(true); }} title="Change the selling price used for margins">
-        Sells for {fmtMoney(price, currency)}
-        {overridden && <span className="text-[10px] text-ink-3">(Shopify {fmtMoney(shopifyPrice, currency)})</span>}
-        <Pencil className="h-3 w-3" />
-      </button>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1">
-      <span>Sells for</span>
-      <input
-        type="number"
-        min="0"
-        step="0.01"
-        className="input w-24 py-0.5 text-right text-xs tnum"
-        value={value}
-        autoFocus
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") save(Number(value));
-          if (e.key === "Escape") setEditing(false);
-        }}
-      />
-      <button type="button" className="btn-secondary px-1.5 py-0.5 text-xs" disabled={pending} onClick={() => save(Number(value))} aria-label="Save price">
-        {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-      </button>
-      {overridden && (
-        <button type="button" className="btn-ghost px-1.5 py-0.5 text-xs" disabled={pending} onClick={() => save(null)} title="Use the Shopify price again">
-          <Undo2 className="h-3 w-3" />
-        </button>
-      )}
-      <button type="button" className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => setEditing(false)}>
-        Cancel
-      </button>
-      {err && <span className="text-bad-text">{err}</span>}
-    </span>
-  );
-}

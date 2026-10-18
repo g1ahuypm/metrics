@@ -19,6 +19,7 @@ const tierSchema = z
       quantity: z.number().int().min(1).max(1000),
       productCost: z.number().min(0),
       shippingCost: z.number().min(0),
+      sellPrice: z.number().min(0).nullable().optional(),
     }),
   )
   .max(50);
@@ -38,7 +39,7 @@ export async function saveTiersAction(productId: string, variantId: string, tier
   }
   await db.$transaction([
     db.costTier.deleteMany({ where: { productId, variantId, country } }),
-    ...parsed.data.map((t) => db.costTier.create({ data: { productId, variantId, country, ...t } })),
+    ...parsed.data.map((t) => db.costTier.create({ data: { productId, variantId, country, quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost, sellPrice: t.sellPrice ?? null } })),
   ]);
   revalidatePath("/", "layout");
   return { success: parsed.data.length ? "Costs saved" : "Costs cleared" };
@@ -57,21 +58,6 @@ export async function recostOrdersAction(): Promise<{ orders: number }> {
   const orders = await recostAllOrders();
   revalidatePath("/", "layout");
   return { orders };
-}
-
-/**
- * Overrides the selling price used for margin previews. variantShopifyId = ""
- * applies to every variant of the product. null clears the override.
- */
-export async function setSellingPriceAction(productId: string, variantShopifyId: string, price: number | null): Promise<FormState> {
-  await requireEditor();
-  if (price !== null && !(price >= 0)) return { error: "Enter a price of 0 or more" };
-  await db.productVariant.updateMany({
-    where: { productId, ...(variantShopifyId ? { shopifyId: variantShopifyId } : {}) },
-    data: { priceOverride: price },
-  });
-  revalidatePath("/", "layout");
-  return { success: price === null ? "Using the Shopify price again" : "Selling price saved" };
 }
 
 // ---------------------------------------------------------------------------
