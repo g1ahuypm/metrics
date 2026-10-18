@@ -1,9 +1,9 @@
 import { requireUser } from "@/lib/auth";
-import { resolveRange, viewQuery } from "@/lib/dates";
+import { scopeQuery } from "@/lib/dates";
+import { getScope } from "@/lib/scope";
 import { fmtDate, fmtMoney, fmtNumber, fmtPercent } from "@/lib/format";
 import { marketLabel } from "@/lib/constants";
 import { getDataStatus, getMetrics, getProductBreakdown, getProductOptions, getRecentOrders } from "@/lib/metrics";
-import { ProductPicker } from "@/components/ProductPicker";
 import { ProductScope } from "@/components/ProductScope";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
@@ -16,8 +16,7 @@ import { EmptyState } from "@/components/EmptyState";
 export default async function SalesPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string; product?: string }> }) {
   await requireUser();
   const sp = await searchParams;
-  const range = resolveRange(sp);
-  const productId = sp.product || undefined;
+  const { range, productId } = await getScope(sp);
   const [report, status, products, orders, options] = await Promise.all([
     getMetrics(range, productId),
     getDataStatus(),
@@ -32,11 +31,10 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
   return (
     <div>
       <PageHeader title="Sales" description="Shopify orders, products and customers">
-        <ProductPicker products={options} value={productId ?? ""} />
         <DateRangePicker range={range} />
       </PageHeader>
 
-      <ProductScope product={product} query={viewQuery(sp)} page="sales" />
+      <ProductScope product={product} query={scopeQuery(range, productId)} page="sales" />
 
       {status.orderCount === 0 ? (
         <EmptyState

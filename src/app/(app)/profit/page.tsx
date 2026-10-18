@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { Download } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { resolveRange, viewQuery } from "@/lib/dates";
+import { scopeQuery } from "@/lib/dates";
+import { getScope } from "@/lib/scope";
 import { fmtDate, fmtMoney, fmtMultiple, fmtNumber, fmtPercent } from "@/lib/format";
 import { getDataStatus, getMetrics, getProductOptions } from "@/lib/metrics";
-import { ProductPicker } from "@/components/ProductPicker";
 import { ProductScope } from "@/components/ProductScope";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
@@ -17,8 +17,7 @@ import { EmptyState } from "@/components/EmptyState";
 export default async function ProfitPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string; product?: string }> }) {
   await requireUser();
   const sp = await searchParams;
-  const range = resolveRange(sp);
-  const productId = sp.product || undefined;
+  const { range, productId } = await getScope(sp);
   const [report, status, products] = await Promise.all([getMetrics(range, productId), getDataStatus(), getProductOptions()]);
   const product = productId ? products.find((p) => p.id === productId) : undefined;
   const { totals: t, previous: p, daily } = report;
@@ -37,14 +36,13 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
   return (
     <div>
       <PageHeader title="Profit & Loss" description="Every line between what customers paid and what you keep.">
-        <ProductPicker products={products} value={productId ?? ""} />
         <DateRangePicker range={range} />
-        <Link href={`/api/export/daily?${viewQuery(sp)}`} className="btn-secondary" prefetch={false}>
+        <Link href={`/api/export/daily?${scopeQuery(range, productId)}`} className="btn-secondary" prefetch={false}>
           <Download className="h-4 w-4" /> Export CSV
         </Link>
       </PageHeader>
 
-      <ProductScope product={product} query={viewQuery(sp)} page="profit" />
+      <ProductScope product={product} query={scopeQuery(range, productId)} page="profit" />
 
       {!hasData ? (
         <EmptyState title="No data yet" description="Connect Shopify and Meta Ads in Settings and run a sync to build your P&L." actionHref="/settings" actionLabel="Go to settings" />

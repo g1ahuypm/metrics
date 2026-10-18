@@ -59,6 +59,21 @@ export async function recostOrdersAction(): Promise<{ orders: number }> {
   return { orders };
 }
 
+/**
+ * Overrides the selling price used for margin previews. variantShopifyId = ""
+ * applies to every variant of the product. null clears the override.
+ */
+export async function setSellingPriceAction(productId: string, variantShopifyId: string, price: number | null): Promise<FormState> {
+  await requireEditor();
+  if (price !== null && !(price >= 0)) return { error: "Enter a price of 0 or more" };
+  await db.productVariant.updateMany({
+    where: { productId, ...(variantShopifyId ? { shopifyId: variantShopifyId } : {}) },
+    data: { priceOverride: price },
+  });
+  revalidatePath("/", "layout");
+  return { success: price === null ? "Using the Shopify price again" : "Selling price saved" };
+}
+
 // ---------------------------------------------------------------------------
 // Custom costs (expenses)
 // ---------------------------------------------------------------------------

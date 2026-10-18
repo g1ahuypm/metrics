@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { resolveRange, toISODate } from "@/lib/dates";
+import { toISODate } from "@/lib/dates";
+import { getScope } from "@/lib/scope";
 import { getMetrics, cents } from "@/lib/metrics";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +17,12 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const sp = req.nextUrl.searchParams;
-  const range = resolveRange({ range: sp.get("range") ?? undefined, from: sp.get("from") ?? undefined, to: sp.get("to") ?? undefined });
-  const product = sp.get("product") || undefined;
+  const { range, productId: product } = await getScope({
+    range: sp.get("range") ?? undefined,
+    from: sp.get("from") ?? undefined,
+    to: sp.get("to") ?? undefined,
+    product: sp.get("product") ?? undefined,
+  });
   const { daily, totals } = await getMetrics(range, product);
 
   const lines = [COLUMNS.join(",")];

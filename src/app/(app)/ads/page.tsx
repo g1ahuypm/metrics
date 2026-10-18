@@ -1,9 +1,9 @@
 import { requireUser } from "@/lib/auth";
-import { resolveRange, viewQuery } from "@/lib/dates";
+import { scopeQuery } from "@/lib/dates";
+import { getScope } from "@/lib/scope";
 import { fmtMoney, fmtMultiple, fmtNumber, fmtPercent } from "@/lib/format";
 import { getCampaignBreakdown, getDataStatus, getMetrics, getProductOptions } from "@/lib/metrics";
 import { canEdit } from "@/lib/auth-shared";
-import { ProductPicker } from "@/components/ProductPicker";
 import { ProductScope } from "@/components/ProductScope";
 import { AutoMatchButton, CampaignProductSelect } from "./CampaignLinks";
 import { PageHeader } from "@/components/PageHeader";
@@ -28,8 +28,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
   const user = await requireUser();
   const editor = canEdit(user.role);
   const sp = await searchParams;
-  const range = resolveRange(sp);
-  const productId = sp.product || undefined;
+  const { range, productId } = await getScope(sp);
   const [report, status, campaigns, products] = await Promise.all([
     getMetrics(range, productId),
     getDataStatus(),
@@ -57,11 +56,10 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
   return (
     <div>
       <PageHeader title="Meta Ads" description="Facebook and Instagram campaign performance, matched against your real sales">
-        <ProductPicker products={products} value={productId ?? ""} />
         <DateRangePicker range={range} />
       </PageHeader>
 
-      <ProductScope product={product} query={viewQuery(sp)} page="ads" />
+      <ProductScope product={product} query={scopeQuery(range, productId)} page="ads" />
 
       {status.insightCount === 0 ? (
         <EmptyState

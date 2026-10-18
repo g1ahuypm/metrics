@@ -97,7 +97,8 @@ model ProductVariant {
   productTitle String
   variantTitle String?
   sku          String?
-  price        Float    @default(0)
+  price        Float    @default(0)   // price in Shopify
+  priceOverride Float?                // what you actually sell it for, if different (set in the app)
   // Cost of goods per unit. Pulled from Shopify InventoryItem.unitCost or
   // edited by hand in the Costs page (manual edits are kept on sync).
   unitCost     Float?

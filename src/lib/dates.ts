@@ -149,3 +149,10 @@ export function viewQuery(sp: ViewParams): string {
   if (sp.product) q.set("product", sp.product);
   return q.toString();
 }
+
+/** Query string for links that should open with the current range and product. */
+export function scopeQuery(range: DateRange, productId?: string): string {
+  const q = new URLSearchParams(rangeToSearch(range));
+  if (productId) q.set("product", productId);
+  return q.toString();
+}

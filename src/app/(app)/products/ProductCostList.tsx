@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, Info, Loader2, Plus, RefreshCw, Search, Trash2, Undo2 } from "lucide-react";
-import { clearVariantTiersAction, recostOrdersAction, saveTiersAction, type TierInput } from "@/lib/actions/costs";
+import { Check, ChevronDown, ChevronRight, Copy, Info, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Undo2 } from "lucide-react";
+import { clearVariantTiersAction, recostOrdersAction, saveTiersAction, setSellingPriceAction, type TierInput } from "@/lib/actions/costs";
 import { resolveTier } from "@/lib/costing";
 import { MARKETS, marketLabel } from "@/lib/constants";
 import { fmtMoney, fmtNumber, fmtPercent, safeDiv } from "@/lib/format";
@@ -16,7 +16,9 @@ export type VariantCostData = {
   shopifyId: string;
   title: string;
   sku: string | null;
-  price: number;
+  price: number; // effective selling price (override or Shopify)
+  shopifyPrice: number;
+  priceOverride: number | null;
   shopifyUnitCost: number | null;
   unitsSold: number;
   quantitiesBought: number[];
@@ -188,7 +190,15 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
             <h3 className="truncate text-sm font-semibold">{product.title}</h3>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
               <span className={`badge ${status.tone}`}>{status.label}</span>
-              <span>Sells for {fmtMoney(price, currency)}</span>
+              <PriceEditor
+                productId={product.productId}
+                variantId=""
+                price={price}
+                shopifyPrice={product.variants[0]?.shopifyPrice ?? 0}
+                overridden={product.variants.some((v) => v.priceOverride !== null)}
+                currency={currency}
+                editor={editor}
+              />
               <span>{product.variants.length} variant{product.variants.length === 1 ? "" : "s"}</span>
               <span>{fmtNumber(units)} units sold</span>
               {countriesSet.length > 0 && <span>Country costs: {countriesSet.join(", ")}</span>}
@@ -259,6 +269,9 @@ function VariantSection({
           <span className="font-medium">{variant.title}</span>
           {variant.sku && <span className="ml-2 text-xs text-ink-3">{variant.sku}</span>}
           <span className="ml-2 text-xs text-ink-3">{fmtNumber(variant.unitsSold)} sold</span>
+          <span className="ml-2 inline-flex text-xs text-ink-3">
+            <PriceEditor productId={product.productId} variantId={variant.shopifyId} price={variant.price} shopifyPrice={variant.shopifyPrice} overridden={variant.priceOverride !== null} currency={currency} editor={editor} />
+          </span>
         </div>
         {editor && !customizing && (
           <button type="button" className="btn-ghost text-xs" onClick={() => setCustomizing(true)}>
@@ -499,4 +512,82 @@ function TierEditor({
 function estimate(tiers: TierInput[], quantity: number): number {
   const r = resolveTier(tiers, quantity);
   return r ? r.productCost + r.shippingCost : 0;
+}
+
+// ---------------------------------------------------------------------------
+
+/** "Sells for" with an inline edit so margins use the price you really charge. */
+function PriceEditor({
+  productId,
+  variantId,
+  price,
+  shopifyPrice,
+  overridden,
+  currency,
+  editor,
+}: {
+  productId: string;
+  variantId: string;
+  price: number;
+  shopifyPrice: number;
+  overridden: boolean;
+  currency: string;
+  editor: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(price));
+  const [pending, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+
+  function save(next: number | null) {
+    start(async () => {
+      const r = await setSellingPriceAction(productId, variantId, next);
+      if (r?.error) setErr(r.error);
+      else {
+        setErr(null);
+        setEditing(false);
+      }
+    });
+  }
+
+  if (!editor) return <span>Sells for {fmtMoney(price, currency)}</span>;
+  if (!editing) {
+    return (
+      <button type="button" className="inline-flex items-center gap-1 hover:text-ink" onClick={() => { setValue(String(price)); setEditing(true); }} title="Change the selling price used for margins">
+        Sells for {fmtMoney(price, currency)}
+        {overridden && <span className="text-[10px] text-ink-3">(Shopify {fmtMoney(shopifyPrice, currency)})</span>}
+        <Pencil className="h-3 w-3" />
+      </button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span>Sells for</span>
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        className="input w-24 py-0.5 text-right text-xs tnum"
+        value={value}
+        autoFocus
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save(Number(value));
+          if (e.key === "Escape") setEditing(false);
+        }}
+      />
+      <button type="button" className="btn-secondary px-1.5 py-0.5 text-xs" disabled={pending} onClick={() => save(Number(value))} aria-label="Save price">
+        {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+      </button>
+      {overridden && (
+        <button type="button" className="btn-ghost px-1.5 py-0.5 text-xs" disabled={pending} onClick={() => save(null)} title="Use the Shopify price again">
+          <Undo2 className="h-3 w-3" />
+        </button>
+      )}
+      <button type="button" className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => setEditing(false)}>
+        Cancel
+      </button>
+      {err && <span className="text-bad-text">{err}</span>}
+    </span>
+  );
 }

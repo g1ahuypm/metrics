@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, Loader2 } from "lucide-react";
 import { PRESETS, toISODate, type DateRange } from "@/lib/dates";
+import { setRangeScopeAction } from "@/lib/actions/scope";
 
 export function DateRangePicker({ range }: { range: DateRange }) {
   const router = useRouter();
@@ -15,7 +16,11 @@ export function DateRangePicker({ range }: { range: DateRange }) {
   const [to, setTo] = useState(toISODate(range.to));
 
   function go(next: URLSearchParams) {
-    start(() => router.push(`${pathname}?${next.toString()}`));
+    const saved = { range: next.get("range") ?? undefined, from: next.get("from") ?? undefined, to: next.get("to") ?? undefined };
+    start(async () => {
+      await setRangeScopeAction(saved);
+      router.push(`${pathname}?${next.toString()}`);
+    });
   }
 
   function pick(key: string) {

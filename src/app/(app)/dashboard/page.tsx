@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { resolveRange, viewQuery } from "@/lib/dates";
+import { scopeQuery } from "@/lib/dates";
+import { getScope } from "@/lib/scope";
 import { fmtMoney, fmtNumber, fmtPercent } from "@/lib/format";
 import { getDataStatus, getMetrics, getProductOptions } from "@/lib/metrics";
-import { ProductPicker } from "@/components/ProductPicker";
 import { ProductScope } from "@/components/ProductScope";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
@@ -19,8 +19,7 @@ type Search = { range?: string; from?: string; to?: string; product?: string; de
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const range = resolveRange(sp);
-  const productId = sp.product || undefined;
+  const { range, productId } = await getScope(sp);
   const [report, status, products] = await Promise.all([getMetrics(range, productId), getDataStatus(), getProductOptions()]);
   const product = productId ? products.find((p) => p.id === productId) : undefined;
   const { totals: t, previous: p, daily } = report;
@@ -30,11 +29,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   return (
     <div>
       <PageHeader title="Dashboard" description={`${range.label} · ${range.days} day${range.days === 1 ? "" : "s"}`}>
-        <ProductPicker products={products} value={productId ?? ""} />
         <DateRangePicker range={range} />
       </PageHeader>
 
-      <ProductScope product={product} query={viewQuery(sp)} page="dashboard" />
+      <ProductScope product={product} query={scopeQuery(range, productId)} page="dashboard" />
 
       {sp.denied && <div className="alert-error mb-4">You need owner or admin access for that page.</div>}
 
@@ -89,7 +87,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <div className="card p-4 lg:col-span-2">
               <div className="mb-2 flex items-baseline justify-between">
                 <h2 className="text-sm font-semibold">Profit & loss</h2>
-                <Link href={`/profit?${viewQuery(sp)}`} className="text-xs text-accent hover:underline">
+                <Link href={`/profit?${scopeQuery(range, productId)}`} className="text-xs text-accent hover:underline">
                   Full statement
                 </Link>
               </div>

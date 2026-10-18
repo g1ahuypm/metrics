@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { Logo } from "./Logo";
+import { ProductPicker, type ProductOption } from "./ProductPicker";
 import { logoutAction } from "@/lib/actions/auth";
 import { canEdit, ROLE_LABELS, type SessionUser } from "@/lib/auth-shared";
 
@@ -35,10 +36,14 @@ const NAV = [
 export function AppShell({
   user,
   storeName,
+  products,
+  productId,
   children,
 }: {
   user: SessionUser;
   storeName: string;
+  products: ProductOption[];
+  productId: string;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -47,6 +52,11 @@ export function AppShell({
 
   const nav = (
     <nav className="flex flex-col gap-1">
+      {products.length > 0 && (
+        <div className="mb-3 px-1">
+          <ProductPicker products={products} value={productId} />
+        </div>
+      )}
       {items.map(({ href, label, icon: Icon }) => {
         const active = pathname === href || pathname.startsWith(`${href}/`);
         return (
