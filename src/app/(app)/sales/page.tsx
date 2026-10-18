@@ -1,8 +1,10 @@
 import { requireUser } from "@/lib/auth";
-import { resolveRange } from "@/lib/dates";
+import { resolveRange, viewQuery } from "@/lib/dates";
 import { fmtDate, fmtMoney, fmtNumber, fmtPercent } from "@/lib/format";
 import { marketLabel } from "@/lib/constants";
-import { getDataStatus, getMetrics, getProductBreakdown, getRecentOrders } from "@/lib/metrics";
+import { getDataStatus, getMetrics, getProductBreakdown, getProductOptions, getRecentOrders } from "@/lib/metrics";
+import { ProductPicker } from "@/components/ProductPicker";
+import { ProductScope } from "@/components/ProductScope";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { KpiCard } from "@/components/KpiCard";
@@ -11,23 +13,30 @@ import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart";
 import { BarSeriesChart } from "@/components/charts/BarSeriesChart";
 import { EmptyState } from "@/components/EmptyState";
 
-export default async function SalesPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {
+export default async function SalesPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string; product?: string }> }) {
   await requireUser();
-  const range = resolveRange(await searchParams);
-  const [report, status, products, orders] = await Promise.all([
-    getMetrics(range),
+  const sp = await searchParams;
+  const range = resolveRange(sp);
+  const productId = sp.product || undefined;
+  const [report, status, products, orders, options] = await Promise.all([
+    getMetrics(range, productId),
     getDataStatus(),
-    getProductBreakdown(range),
-    getRecentOrders(range, 50),
+    getProductBreakdown(range, productId),
+    getRecentOrders(range, 50, productId),
+    getProductOptions(),
   ]);
+  const product = productId ? options.find((p) => p.id === productId) : undefined;
   const { totals: t, previous: p, daily } = report;
   const currency = status.settings?.currency ?? "USD";
 
   return (
     <div>
       <PageHeader title="Sales" description="Shopify orders, products and customers">
+        <ProductPicker products={options} value={productId ?? ""} />
         <DateRangePicker range={range} />
       </PageHeader>
+
+      <ProductScope product={product} query={viewQuery(sp)} page="sales" />
 
       {status.orderCount === 0 ? (
         <EmptyState

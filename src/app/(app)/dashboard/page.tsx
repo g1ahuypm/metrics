@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { rangeToSearch, resolveRange } from "@/lib/dates";
+import { resolveRange, viewQuery } from "@/lib/dates";
 import { fmtMoney, fmtNumber, fmtPercent } from "@/lib/format";
-import { getDataStatus, getMetrics } from "@/lib/metrics";
+import { getDataStatus, getMetrics, getProductOptions } from "@/lib/metrics";
+import { ProductPicker } from "@/components/ProductPicker";
+import { ProductScope } from "@/components/ProductScope";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { KpiCard } from "@/components/KpiCard";
@@ -12,13 +14,15 @@ import { ProfitBreakdown } from "@/components/ProfitBreakdown";
 import { DataBanner } from "@/components/DataBanner";
 import { EmptyState } from "@/components/EmptyState";
 
-type Search = { range?: string; from?: string; to?: string; denied?: string };
+type Search = { range?: string; from?: string; to?: string; product?: string; denied?: string };
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const range = resolveRange(sp);
-  const [report, status] = await Promise.all([getMetrics(range), getDataStatus()]);
+  const productId = sp.product || undefined;
+  const [report, status, products] = await Promise.all([getMetrics(range, productId), getDataStatus(), getProductOptions()]);
+  const product = productId ? products.find((p) => p.id === productId) : undefined;
   const { totals: t, previous: p, daily } = report;
   const currency = status.settings?.currency ?? "USD";
   const hasData = status.orderCount > 0 || status.insightCount > 0;
@@ -26,8 +30,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   return (
     <div>
       <PageHeader title="Dashboard" description={`${range.label} · ${range.days} day${range.days === 1 ? "" : "s"}`}>
+        <ProductPicker products={products} value={productId ?? ""} />
         <DateRangePicker range={range} />
       </PageHeader>
+
+      <ProductScope product={product} query={viewQuery(sp)} page="dashboard" />
 
       {sp.denied && <div className="alert-error mb-4">You need owner or admin access for that page.</div>}
 
@@ -82,7 +89,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <div className="card p-4 lg:col-span-2">
               <div className="mb-2 flex items-baseline justify-between">
                 <h2 className="text-sm font-semibold">Profit & loss</h2>
-                <Link href={`/profit?${rangeToSearch(range)}`} className="text-xs text-accent hover:underline">
+                <Link href={`/profit?${viewQuery(sp)}`} className="text-xs text-accent hover:underline">
                   Full statement
                 </Link>
               </div>

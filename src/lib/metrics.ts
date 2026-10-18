@@ -127,32 +127,101 @@ function finalize(d: MoneyLines): void {
   d.totalCosts = d.revenue - d.netProfit;
 }
 
-async function loadDaily(from: Date, to: Date): Promise<DailyPoint[]> {
+/** One order's contribution to the daily figures, already narrowed to a product when one is selected. */
+type OrderSlice = {
+  createdAt: Date;
+  grossSales: number;
+  discounts: number;
+  refunds: number;
+  shippingCharged: number;
+  tax: number;
+  cogs: number;
+  shippingCost: number;
+  handlingCost: number;
+  paymentFees: number;
+  platformFees: number;
+  units: number;
+  isNewCustomer: boolean;
+};
+
+const orderSelect = {
+  createdAt: true,
+  subtotal: true,
+  discounts: true,
+  shippingCharged: true,
+  tax: true,
+  refunded: true,
+  cogs: true,
+  shippingCost: true,
+  handlingCost: true,
+  transactionFees: true,
+  platformFees: true,
+  itemCount: true,
+  isNewCustomer: true,
+} as const;
+
+async function loadOrderSlices(from: Date, toEnd: Date, productId?: string): Promise<OrderSlice[]> {
+  if (!productId) {
+    const orders = await db.order.findMany({ where: { createdAt: { gte: from, lte: toEnd }, cancelledAt: null }, select: orderSelect });
+    return orders.map((o) => ({
+      createdAt: o.createdAt,
+      grossSales: o.subtotal + o.discounts,
+      discounts: o.discounts,
+      refunds: o.refunded,
+      shippingCharged: o.shippingCharged,
+      tax: o.tax,
+      cogs: o.cogs,
+      shippingCost: o.shippingCost,
+      handlingCost: o.handlingCost,
+      paymentFees: o.transactionFees,
+      platformFees: o.platformFees,
+      units: o.itemCount,
+      isNewCustomer: o.isNewCustomer,
+    }));
+  }
+
+  // Product view: orders containing the product. Line-level amounts (price, product
+  // cost, tier shipping) are exact; order-level amounts (tax, shipping charged,
+  // fees, refunds, discounts, handling) are split by the product's share of the order.
+  const orders = await db.order.findMany({
+    where: { createdAt: { gte: from, lte: toEnd }, cancelledAt: null, lineItems: { some: { variant: { productId } } } },
+    select: {
+      ...orderSelect,
+      lineItems: { select: { price: true, quantity: true, unitCost: true, shippingCost: true, costSource: true, variant: { select: { productId: true } } } },
+    },
+  });
+  return orders.map((o) => {
+    const mine = o.lineItems.filter((li) => li.variant?.productId === productId);
+    const minePrice = mine.reduce((s, li) => s + li.price, 0);
+    const share = o.subtotal > 0 ? minePrice / o.subtotal : o.lineItems.length ? mine.length / o.lineItems.length : 0;
+    const tiered = o.lineItems.some((li) => li.costSource === "tier");
+    return {
+      createdAt: o.createdAt,
+      grossSales: minePrice + o.discounts * share,
+      discounts: o.discounts * share,
+      refunds: o.refunded * share,
+      shippingCharged: o.shippingCharged * share,
+      tax: o.tax * share,
+      cogs: mine.reduce((s, li) => s + li.unitCost * li.quantity, 0),
+      shippingCost: tiered ? mine.reduce((s, li) => s + li.shippingCost, 0) : o.shippingCost * share,
+      handlingCost: o.handlingCost * share,
+      paymentFees: o.transactionFees * share,
+      platformFees: o.platformFees * share,
+      units: mine.reduce((s, li) => s + li.quantity, 0),
+      isNewCustomer: o.isNewCustomer,
+    };
+  });
+}
+
+async function loadDaily(from: Date, to: Date, productId?: string): Promise<DailyPoint[]> {
   const days = eachDay(from, to);
   const map = new Map<string, DailyPoint>(days.map((d) => [d, emptyDay(d)]));
   const toEnd = endOfUtcDay(to);
 
-  const [orders, insights, customCosts] = await Promise.all([
-    db.order.findMany({
-      where: { createdAt: { gte: from, lte: toEnd }, cancelledAt: null },
-      select: {
-        createdAt: true,
-        subtotal: true,
-        discounts: true,
-        shippingCharged: true,
-        tax: true,
-        refunded: true,
-        cogs: true,
-        shippingCost: true,
-        handlingCost: true,
-        transactionFees: true,
-        platformFees: true,
-        itemCount: true,
-        isNewCustomer: true,
-      },
-    }),
+  const [orders, insights, customCosts, totalRevenueByDay] = await Promise.all([
+    loadOrderSlices(from, toEnd, productId),
     db.adInsight.findMany({
-      where: { date: { gte: from, lte: toEnd } },
+      where: { date: { gte: from, lte: toEnd }, ...(productId ? { campaign: { productId } } : {}) },
       select: {
         date: true, spend: true, impressions: true, reach: true, clicks: true, purchases: true, purchaseValue: true,
         addToCart: true, initiateCheckout: true,
@@ -161,24 +230,37 @@ async function loadDaily(from: Date, to: Date): Promise<DailyPoint[]> {
     db.customCost.findMany({
       where: { startDate: { lte: toEnd }, OR: [{ endDate: null }, { endDate: { gte: from } }] },
     }),
+    // Store-wide revenue per day, used to allocate shared expenses to a product.
+    productId
+      ? db.order
+          .findMany({ where: { createdAt: { gte: from, lte: toEnd }, cancelledAt: null }, select: { createdAt: true, total: true, refunded: true } })
+          .then((rows) => {
+            const m = new Map<string, number>();
+            for (const r of rows) {
+              const k = toISODate(utcDay(r.createdAt));
+              m.set(k, (m.get(k) ?? 0) + r.total - r.refunded);
+            }
+            return m;
+          })
+      : Promise.resolve(null as Map<string, number> | null),
   ]);
 
   for (const o of orders) {
     const d = map.get(toISODate(utcDay(o.createdAt)));
     if (!d) continue;
-    d.grossSales += o.subtotal + o.discounts;
+    d.grossSales += o.grossSales;
     d.discounts += o.discounts;
-    d.refunds += o.refunded;
+    d.refunds += o.refunds;
     d.shippingCharged += o.shippingCharged;
     d.tax += o.tax;
     d.cogs += o.cogs;
     d.shippingCost += o.shippingCost;
     d.handlingCost += o.handlingCost;
-    d.paymentFees += o.transactionFees;
+    d.paymentFees += o.paymentFees;
     d.platformFees += o.platformFees;
     d.orders += 1;
-    d.units += o.itemCount;
-    if (o.refunded > 0) d.refundedOrders += 1;
+    d.units += o.units;
+    if (o.refunds > 0) d.refundedOrders += 1;
     if (o.isNewCustomer) d.newCustomers += 1;
     else d.returningCustomers += 1;
   }
@@ -206,11 +288,13 @@ async function loadDaily(from: Date, to: Date): Promise<DailyPoint[]> {
     for (const d of map.values()) {
       const day = new Date(`${d.date}T00:00:00.000Z`);
       if (day < start || (end && day > end)) continue;
+      // In product view, fixed expenses are shared out by the product's share of that day's revenue.
+      const share = totalRevenueByDay ? (() => { const t = totalRevenueByDay.get(d.date) ?? 0; return t > 0 ? d.revenue / t : 0; })() : 1;
       let amount = 0;
       switch (c.type) {
-        case "MONTHLY": amount = c.amount / daysInUtcMonth(day); break;
-        case "DAILY": amount = c.amount; break;
-        case "ONE_TIME": amount = day.getTime() === start.getTime() ? c.amount : 0; break;
+        case "MONTHLY": amount = (c.amount / daysInUtcMonth(day)) * share; break;
+        case "DAILY": amount = c.amount * share; break;
+        case "ONE_TIME": amount = day.getTime() === start.getTime() ? c.amount * share : 0; break;
         case "PERCENT_REVENUE": amount = (d.revenue * c.amount) / 100; break;
         case "PER_ORDER": amount = d.orders * c.amount; break;
       }
@@ -274,10 +358,10 @@ export type MetricsReport = {
   previous: Totals;
 };
 
-export async function getMetrics(range: DateRange): Promise<MetricsReport> {
+export async function getMetrics(range: DateRange, productId?: string): Promise<MetricsReport> {
   const [daily, prevDaily] = await Promise.all([
-    loadDaily(range.from, range.to),
-    loadDaily(range.prevFrom, range.prevTo),
+    loadDaily(range.from, range.to, productId),
+    loadDaily(range.prevFrom, range.prevTo, productId),
   ]);
   return { range, daily, totals: summarize(daily), previous: summarize(prevDaily) };
 }
@@ -293,6 +377,7 @@ export type CampaignRow = {
   status: string;
   objective: string | null;
   dailyBudget: number | null;
+  productId: string | null;
   spend: number;
   impressions: number;
   reach: number;
@@ -310,9 +395,9 @@ export type CampaignRow = {
   frequency: number;
 };
 
-export async function getCampaignBreakdown(range: DateRange): Promise<CampaignRow[]> {
+export async function getCampaignBreakdown(range: DateRange, productId?: string): Promise<CampaignRow[]> {
   const rows = await db.adInsight.findMany({
-    where: { date: { gte: range.from, lte: endOfUtcDay(range.to) } },
+    where: { date: { gte: range.from, lte: endOfUtcDay(range.to) }, ...(productId ? { campaign: { productId } } : {}) },
     include: { campaign: true },
   });
   const map = new Map<string, CampaignRow>();
@@ -321,7 +406,7 @@ export async function getCampaignBreakdown(range: DateRange): Promise<CampaignRo
     if (!c) {
       c = {
         id: r.campaign.id, metaId: r.campaign.metaId, name: r.campaign.name, status: r.campaign.status,
-        objective: r.campaign.objective, dailyBudget: r.campaign.dailyBudget,
+        objective: r.campaign.objective, dailyBudget: r.campaign.dailyBudget, productId: r.campaign.productId,
         spend: 0, impressions: 0, reach: 0, clicks: 0, purchases: 0, purchaseValue: 0, addToCart: 0, initiateCheckout: 0,
         roas: 0, cpa: 0, ctr: 0, cpc: 0, cpm: 0, cvr: 0, frequency: 0,
       };
@@ -365,9 +450,12 @@ export type ProductRow = {
   unitCost: number | null;
 };
 
-export async function getProductBreakdown(range: DateRange): Promise<ProductRow[]> {
+export async function getProductBreakdown(range: DateRange, productId?: string): Promise<ProductRow[]> {
   const items = await db.orderLineItem.findMany({
-    where: { order: { createdAt: { gte: range.from, lte: endOfUtcDay(range.to) }, cancelledAt: null } },
+    where: {
+      order: { createdAt: { gte: range.from, lte: endOfUtcDay(range.to) }, cancelledAt: null },
+      ...(productId ? { variant: { productId } } : {}),
+    },
     include: { variant: { select: { productTitle: true, variantTitle: true, unitCost: true } } },
   });
   const map = new Map<string, ProductRow & { orderIds: Set<string> }>();
@@ -401,9 +489,12 @@ export async function getProductBreakdown(range: DateRange): Promise<ProductRow[
   return out;
 }
 
-export async function getRecentOrders(range: DateRange, limit = 50) {
+export async function getRecentOrders(range: DateRange, limit = 50, productId?: string) {
   return db.order.findMany({
-    where: { createdAt: { gte: range.from, lte: endOfUtcDay(range.to) } },
+    where: {
+      createdAt: { gte: range.from, lte: endOfUtcDay(range.to) },
+      ...(productId ? { lineItems: { some: { variant: { productId } } } } : {}),
+    },
     orderBy: { createdAt: "desc" },
     take: limit,
     include: { lineItems: { select: { title: true, quantity: true } } },
@@ -425,4 +516,29 @@ export async function getDataStatus() {
     shopifyConnected: Boolean(settings?.shopifyDomain && settings?.shopifyToken),
     metaConnected: Boolean(settings?.metaAdAccountId && settings?.metaToken),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Product selector
+// ---------------------------------------------------------------------------
+
+export type ProductOption = { id: string; title: string; units: number; campaigns: number };
+
+/** Products for the picker, most-sold first, with how many campaigns are linked to each. */
+export async function getProductOptions(): Promise<ProductOption[]> {
+  const [variants, sold, campaigns] = await Promise.all([
+    db.productVariant.findMany({ select: { id: true, productId: true, productTitle: true } }),
+    db.orderLineItem.groupBy({ by: ["variantId"], _sum: { quantity: true }, where: { variantId: { not: null } } }),
+    db.campaign.groupBy({ by: ["productId"], _count: { _all: true }, where: { productId: { not: null } } }),
+  ]);
+  const unitsByVariant = new Map(sold.map((s) => [s.variantId, s._sum.quantity ?? 0]));
+  const campaignsByProduct = new Map(campaigns.map((c) => [c.productId, c._count._all]));
+  const map = new Map<string, ProductOption>();
+  for (const v of variants) {
+    if (!v.productId) continue;
+    const p = map.get(v.productId) ?? { id: v.productId, title: v.productTitle, units: 0, campaigns: campaignsByProduct.get(v.productId) ?? 0 };
+    p.units += unitsByVariant.get(v.id) ?? 0;
+    map.set(v.productId, p);
+  }
+  return [...map.values()].sort((a, b) => b.units - a.units || a.title.localeCompare(b.title));
 }

@@ -1,7 +1,11 @@
 import { requireUser } from "@/lib/auth";
-import { resolveRange } from "@/lib/dates";
+import { resolveRange, viewQuery } from "@/lib/dates";
 import { fmtMoney, fmtMultiple, fmtNumber, fmtPercent } from "@/lib/format";
-import { getCampaignBreakdown, getDataStatus, getMetrics } from "@/lib/metrics";
+import { getCampaignBreakdown, getDataStatus, getMetrics, getProductOptions } from "@/lib/metrics";
+import { canEdit } from "@/lib/auth-shared";
+import { ProductPicker } from "@/components/ProductPicker";
+import { ProductScope } from "@/components/ProductScope";
+import { AutoMatchButton, CampaignProductSelect } from "./CampaignLinks";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { KpiCard } from "@/components/KpiCard";
@@ -20,10 +24,21 @@ function statusBadge(status: string) {
   );
 }
 
-export default async function AdsPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {
-  await requireUser();
-  const range = resolveRange(await searchParams);
-  const [report, status, campaigns] = await Promise.all([getMetrics(range), getDataStatus(), getCampaignBreakdown(range)]);
+export default async function AdsPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string; product?: string }> }) {
+  const user = await requireUser();
+  const editor = canEdit(user.role);
+  const sp = await searchParams;
+  const range = resolveRange(sp);
+  const productId = sp.product || undefined;
+  const [report, status, campaigns, products] = await Promise.all([
+    getMetrics(range, productId),
+    getDataStatus(),
+    getCampaignBreakdown(range, productId),
+    getProductOptions(),
+  ]);
+  const product = productId ? products.find((p) => p.id === productId) : undefined;
+  const unlinked = campaigns.filter((c) => !c.productId).length;
+  const titleOf = new Map(products.map((p) => [p.id, p.title]));
   const { totals: t, previous: p, daily } = report;
   const currency = status.settings?.currency ?? "USD";
 
@@ -42,8 +57,11 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
   return (
     <div>
       <PageHeader title="Meta Ads" description="Facebook and Instagram campaign performance, matched against your real sales">
+        <ProductPicker products={products} value={productId ?? ""} />
         <DateRangePicker range={range} />
       </PageHeader>
+
+      <ProductScope product={product} query={viewQuery(sp)} page="ads" />
 
       {status.insightCount === 0 ? (
         <EmptyState
@@ -105,15 +123,23 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
           </div>
 
           <div className="mt-4 card overflow-hidden">
-            <div className="px-4 pt-4 pb-2">
-              <h2 className="text-sm font-semibold">Campaigns</h2>
-              <p className="text-xs text-ink-3">Sorted by spend. Metrics are Meta-reported for the selected period.</p>
+            <div className="flex flex-col gap-2 px-4 pt-4 pb-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">Campaigns</h2>
+                <p className="text-xs text-ink-3">
+                  Sorted by spend. Metrics are Meta-reported for the selected period.
+                  {editor && " Use \u201cSells product\u201d to link each campaign to the product it advertises; the product selector then shows only those campaigns."}
+                  {!productId && unlinked > 0 && <span className="text-warn-text"> {unlinked} campaign{unlinked === 1 ? "" : "s"} not linked yet.</span>}
+                </p>
+              </div>
+              {editor && <AutoMatchButton />}
             </div>
             <div className="overflow-x-auto">
               <table className="table">
                 <thead>
                   <tr>
                     <th>Campaign</th>
+                    <th>Sells product</th>
                     <th>Status</th>
                     <th className="text-right">Spend</th>
                     <th className="text-right">Purchases</th>
@@ -137,6 +163,13 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
                         <div className="max-w-[260px] truncate font-medium">{c.name}</div>
                         {c.objective && <div className="text-[11px] text-ink-3">{c.objective.replace(/^OUTCOME_/, "").toLowerCase()}</div>}
                       </td>
+                      <td>
+                        {editor ? (
+                          <CampaignProductSelect campaignId={c.id} productId={c.productId} products={products.map((p) => ({ id: p.id, title: p.title }))} />
+                        ) : (
+                          <span className="text-xs text-ink-2">{c.productId ? titleOf.get(c.productId) ?? "Linked" : "Not linked"}</span>
+                        )}
+                      </td>
                       <td>{statusBadge(c.status)}</td>
                       <td className="text-right tnum">{fmtMoney(c.spend, currency)}</td>
                       <td className="text-right tnum">{fmtNumber(c.purchases)}</td>
@@ -157,6 +190,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
                     <tr className="font-semibold">
                       <td>Total</td>
                       <td></td>
+                      <td></td>
                       <td className="text-right tnum">{fmtMoney(totalRow.spend, currency)}</td>
                       <td className="text-right tnum">{fmtNumber(totalRow.purchases)}</td>
                       <td className="text-right tnum">{fmtMoney(totalRow.purchaseValue, currency)}</td>
@@ -174,7 +208,9 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
                   )}
                   {campaigns.length === 0 && (
                     <tr>
-                      <td colSpan={15} className="text-center text-ink-3">No campaign data in this period</td>
+                      <td colSpan={16} className="text-center text-ink-3">
+                        {productId ? "No campaigns are linked to this product. Clear the product filter and use “Sells product” to link them." : "No campaign data in this period"}
+                      </td>
                     </tr>
                   )}
                 </tbody>

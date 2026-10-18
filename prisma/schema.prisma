@@ -196,8 +196,11 @@ model Campaign {
   status      String       @default("ACTIVE")
   objective   String?
   dailyBudget Float?
+  productId   String?                     // ProductVariant.productId this campaign sells (set in the app)
   updatedAt   DateTime     @updatedAt
   insights    AdInsight[]
+
+  @@index([productId])
 }
 
 model AdInsight {

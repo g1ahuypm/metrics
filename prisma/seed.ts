@@ -51,11 +51,11 @@ const pickCountry = () => {
 const CURRENCY: Record<string, string> = { US: "USD", CA: "CAD", AU: "AUD", GB: "GBP", NZ: "NZD" };
 
 const CAMPAIGNS = [
-  { name: "[PROSPECTING] Broad – Hoodie UGC", objective: "OUTCOME_SALES", status: "ACTIVE", budget: 250, base: 240, roas: 2.6 },
-  { name: "[PROSPECTING] Interests – Outdoor", objective: "OUTCOME_SALES", status: "ACTIVE", budget: 120, base: 110, roas: 1.9 },
+  { name: "[PROSPECTING] Everyday Hoodie – UGC", objective: "OUTCOME_SALES", status: "ACTIVE", budget: 250, base: 240, roas: 2.6, product: "Everyday Hoodie" },
+  { name: "[PROSPECTING] Everyday Hoodie – Interests", objective: "OUTCOME_SALES", status: "ACTIVE", budget: 120, base: 110, roas: 1.9, product: "Everyday Hoodie" },
   { name: "[RETARGETING] Site visitors 30d", objective: "OUTCOME_SALES", status: "ACTIVE", budget: 60, base: 55, roas: 5.4 },
   { name: "[RETARGETING] Cart abandoners", objective: "OUTCOME_SALES", status: "ACTIVE", budget: 40, base: 38, roas: 7.1 },
-  { name: "[TEST] Weekender launch – Static", objective: "OUTCOME_SALES", status: "PAUSED", budget: 80, base: 70, roas: 1.2, activeUntil: 30 },
+  { name: "[TEST] Weekender Bag launch – Static", objective: "OUTCOME_SALES", status: "PAUSED", budget: 80, base: 70, roas: 1.2, activeUntil: 30, product: "Weekender Bag" },
 ];
 
 async function seedOwner() {
@@ -134,8 +134,9 @@ async function seedDemoData() {
   // Campaigns
   const campaigns: ((typeof CAMPAIGNS)[number] & { id: string })[] = [];
   for (const c of CAMPAIGNS) {
+    const productId = (c as { product?: string }).product ? `gid://shopify/Product/${100 + PRODUCTS.findIndex((p) => p.product === (c as { product?: string }).product)}` : null;
     const row = await db.campaign.create({
-      data: { metaId: `1200${campaigns.length}0000000${int(100, 999)}`, name: c.name, status: c.status, objective: c.objective, dailyBudget: c.budget },
+      data: { metaId: `1200${campaigns.length}0000000${int(100, 999)}`, name: c.name, status: c.status, objective: c.objective, dailyBudget: c.budget, productId },
     });
     campaigns.push({ ...c, id: row.id });
   }

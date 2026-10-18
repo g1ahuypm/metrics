@@ -136,3 +136,16 @@ export function rangeToSearch(range: DateRange): string {
   if (range.preset === "custom") return `from=${toISODate(range.from)}&to=${toISODate(range.to)}`;
   return `range=${range.preset}`;
 }
+
+export type ViewParams = { range?: string; from?: string; to?: string; product?: string };
+
+/** Query string that preserves the selected date range and product across pages. */
+export function viewQuery(sp: ViewParams): string {
+  const q = new URLSearchParams();
+  if (sp.from && sp.to) {
+    q.set("from", sp.from);
+    q.set("to", sp.to);
+  } else if (sp.range) q.set("range", sp.range);
+  if (sp.product) q.set("product", sp.product);
+  return q.toString();
+}
