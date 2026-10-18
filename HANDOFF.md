@@ -87,14 +87,20 @@ store-wide revenue; $0 lines of other products in the same order are treated as 
 
 ## OPEN PROBLEMS — the owner's current complaints, in priority order
 
-1. **Edits don't recalculate.** He edited product costs and selling prices and the
-   numbers did not change. Root causes: (a) costs apply to orders only when
-   "Apply to past orders" is clicked or on the next sync; (b) "sells for" overrides
-   only affect the margin preview on the Product costs page, not the P&L (P&L uses
-   what customers actually paid, which is correct, but this was not explained and
-   feels broken). Required: saving costs must immediately re-price affected orders
-   (no separate button), with clear feedback; selling-price override semantics must
-   be decided and made obvious (either drop it or make it clearly "planning only").
+1. ~~**Edits don't recalculate.**~~ **Fixed.** Saving product costs re-prices every order
+   containing that product (`repriceOrders` in `src/lib/costbook.ts`, bulk SQL, writes only
+   changed rows) and shows "Saved · N orders updated". Saving Expenses assumptions re-prices
+   all orders (handling, platform fee %, and payment fees where `Order.feesEstimated` is true;
+   Shopify-reported fees are never overwritten; `null` = synced before tracking, left as is).
+   Every sync also re-prices. The "Apply to past orders" button and the "sells for" override
+   (`CostTier.sellPrice`, `ProductVariant.priceOverride`) were removed: the column is now a
+   read-only "Customers paid" = average of real orders per bundle size, same as the P&L.
+   Also fixed while verifying on real orders: lines use Shopify `currentQuantity` (order edits,
+   e.g. #LW001285 had a removed upsell line), refunds are no longer subtracted twice
+   (current totals already exclude them), the same variant on several lines in one order is
+   costed at the combined bundle tier (Zipify post-purchase upsells), bundle sizes on the
+   Product costs page are counted per order, and per-unit cost is no longer rounded
+   (3 × $13.33 ≠ $40). These sync fixes reach existing orders only after a Full resync.
 2. **Product ↔ campaign linking is confusing.** "Sells product" is only visible on
    the Meta Ads campaign table when campaigns have synced; the owner could not find
    it. Required: a first-class, obvious way to link campaigns to a product (e.g. on

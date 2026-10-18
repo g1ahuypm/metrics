@@ -14,22 +14,32 @@ export default async function ProductsPage() {
     db.costTier.findMany({ orderBy: { quantity: "asc" } }),
     db.orderLineItem.findMany({
       where: { variantId: { not: null }, order: { cancelledAt: null } },
-      select: { variantId: true, quantity: true, price: true, listPrice: true, order: { select: { country: true } } },
+      select: { orderId: true, variantId: true, quantity: true, price: true, listPrice: true, order: { select: { country: true } } },
     }),
   ]);
   const productOfVariant = new Map(variants.map((v) => [v.id, v.productId ?? `variant:${v.shopifyId}`]));
-  // What each bundle size actually sells for, from real orders: productId → quantity → { total, count, gifts }
-  const soldByQty = new Map<string, Map<number, { total: number; count: number; zero: number }>>();
+  // A bundle is how many of a product one order holds, even when they arrive on
+  // separate lines (post-purchase upsells): order+product → { quantity, price }.
+  const bundles = new Map<string, { pid: string; quantity: number; price: number }>();
   for (const s of sold) {
     const pid = s.variantId ? productOfVariant.get(s.variantId) : undefined;
     if (!pid) continue;
-    const m = soldByQty.get(pid) ?? new Map();
-    const row = m.get(s.quantity) ?? { total: 0, count: 0, zero: 0 };
-    row.total += s.price;
+    const key = `${s.orderId}|${pid}`;
+    const b = bundles.get(key) ?? { pid, quantity: 0, price: 0 };
+    b.quantity += s.quantity;
+    b.price += s.price;
+    bundles.set(key, b);
+  }
+  // What each bundle size actually sells for, from real orders: productId → quantity → { total, count, gifts }
+  const soldByQty = new Map<string, Map<number, { total: number; count: number; zero: number }>>();
+  for (const b of bundles.values()) {
+    const m = soldByQty.get(b.pid) ?? new Map();
+    const row = m.get(b.quantity) ?? { total: 0, count: 0, zero: 0 };
+    row.total += b.price;
     row.count += 1;
-    if (s.price === 0) row.zero += 1;
-    m.set(s.quantity, row);
-    soldByQty.set(pid, m);
+    if (b.price === 0) row.zero += 1;
+    m.set(b.quantity, row);
+    soldByQty.set(b.pid, m);
   }
 
   // Units sold per variant, which bundle quantities customers buy, and where orders ship.
@@ -38,11 +48,13 @@ export default async function ProductsPage() {
     if (!s.variantId) continue;
     const row = soldByVariant.get(s.variantId) ?? { units: 0, quantities: new Set<number>(), countries: {} };
     row.units += s.quantity;
-    row.quantities.add(s.quantity);
     const c = s.order.country ?? "";
     row.countries[c] = (row.countries[c] ?? 0) + s.quantity;
     soldByVariant.set(s.variantId, row);
   }
+  const qtyPerOrder = new Map<string, number>();
+  for (const s of sold) if (s.variantId) qtyPerOrder.set(`${s.orderId}|${s.variantId}`, (qtyPerOrder.get(`${s.orderId}|${s.variantId}`) ?? 0) + s.quantity);
+  for (const [key, q] of qtyPerOrder) soldByVariant.get(key.split("|")[1])?.quantities.add(q);
 
   const products = new Map<string, ProductCostData>();
   for (const v of variants) {
@@ -87,7 +99,7 @@ export default async function ProductsPage() {
   for (const t of tiers) {
     const p = products.get(t.productId);
     if (!p) continue;
-    const tier = { quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost, sellPrice: t.sellPrice };
+    const tier = { quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost };
     const target = t.variantId === "" ? p.tiers : p.variants.find((v) => v.shopifyId === t.variantId)?.tiers;
     if (!target) continue;
     (target[t.country] ??= []).push(tier);

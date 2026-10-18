@@ -6,7 +6,7 @@ import { db } from "../db";
 import { requireEditor } from "../auth";
 import { parseISODate } from "../dates";
 import { COST_TYPES } from "../constants";
-import { recostAllOrders } from "../costbook";
+import { repriceOrders } from "../costbook";
 import type { FormState } from "./auth";
 
 // ---------------------------------------------------------------------------
@@ -19,12 +19,17 @@ const tierSchema = z
       quantity: z.number().int().min(1).max(1000),
       productCost: z.number().min(0),
       shippingCost: z.number().min(0),
-      sellPrice: z.number().min(0).nullable().optional(),
     }),
   )
   .max(50);
 
 export type TierInput = z.infer<typeof tierSchema>[number];
+
+/** "Saved · 37 orders updated" — so the owner sees that past orders were re-priced. */
+function repricedMessage(saved: string, orders: number): string {
+  if (orders === 0) return `${saved} · no orders yet`;
+  return `${saved} · ${orders} order${orders === 1 ? "" : "s"} updated`;
+}
 
 /** Replaces the tiers for a product (variantId = "") or one variant, for one country ("" = default). */
 export async function saveTiersAction(productId: string, variantId: string, tiers: TierInput[], country = ""): Promise<FormState> {
@@ -39,25 +44,20 @@ export async function saveTiersAction(productId: string, variantId: string, tier
   }
   await db.$transaction([
     db.costTier.deleteMany({ where: { productId, variantId, country } }),
-    ...parsed.data.map((t) => db.costTier.create({ data: { productId, variantId, country, quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost, sellPrice: t.sellPrice ?? null } })),
+    ...parsed.data.map((t) => db.costTier.create({ data: { productId, variantId, country, quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost } })),
   ]);
+  const { orders } = await repriceOrders({ productIds: [productId] });
   revalidatePath("/", "layout");
-  return { success: parsed.data.length ? "Costs saved" : "Costs cleared" };
+  return { success: repricedMessage(parsed.data.length ? "Saved" : "Cleared", orders) };
 }
 
 /** Removes a variant's own tiers for one country (or all countries) so it falls back to the product-level tiers. */
-export async function clearVariantTiersAction(productId: string, variantId: string, country?: string): Promise<void> {
+export async function clearVariantTiersAction(productId: string, variantId: string, country?: string): Promise<FormState> {
   await requireEditor();
   await db.costTier.deleteMany({ where: { productId, variantId, ...(country === undefined ? {} : { country }) } });
+  const { orders } = await repriceOrders({ productIds: [productId] });
   revalidatePath("/", "layout");
-}
-
-/** Re-prices every stored order with the current tiers. */
-export async function recostOrdersAction(): Promise<{ orders: number }> {
-  await requireEditor();
-  const orders = await recostAllOrders();
-  revalidatePath("/", "layout");
-  return { orders };
+  return { success: repricedMessage("Using product costs", orders) };
 }
 
 // ---------------------------------------------------------------------------

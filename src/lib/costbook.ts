@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "./db";
-import { tierKey, type CostBook, type Tier } from "./costing";
+import { Prisma } from "@prisma/client";
+import { costOrder, round2, tierKey, type CostBook, type Tier } from "./costing";
 
 /** Loads every cost tier and variant cost into memory for fast order costing. */
 export async function loadCostBook(fallbackCogsPercent: number): Promise<CostBook> {
@@ -34,18 +35,39 @@ export async function loadCostBook(fallbackCogsPercent: number): Promise<CostBoo
   return book;
 }
 
-/** Recosts every stored order with the current cost book. Returns the number of orders updated. */
-export async function recostAllOrders(): Promise<number> {
+export type RepriceResult = { orders: number; changed: number };
+
+const differs = (a: number, b: number) => Math.abs(a - b) >= 0.005;
+
+/**
+ * Re-prices stored orders with the current product costs and Expenses
+ * assumptions. Scoped to orders containing any of `productIds` when given.
+ * Only rows whose numbers actually change are written, in bulk.
+ */
+export async function repriceOrders(scope: { productIds?: string[] } = {}): Promise<RepriceResult> {
   const settings = await db.settings.findUnique({ where: { id: "default" } });
+  const cfg = {
+    paymentFeePercent: settings?.paymentFeePercent ?? 0,
+    paymentFeeFixed: settings?.paymentFeeFixed ?? 0,
+    platformFeePercent: settings?.platformFeePercent ?? 0,
+    defaultShippingCost: settings?.defaultShippingCost ?? 0,
+    defaultHandlingCost: settings?.defaultHandlingCost ?? 0,
+  };
   const book = await loadCostBook(settings?.defaultCogsPercent ?? 0);
-  const { costOrder } = await import("./costing");
-  const variantsById = await db.productVariant.findMany({ select: { id: true, shopifyId: true } });
-  const shopifyIdOf = new Map(variantsById.map((v) => [v.id, v.shopifyId]));
+  const shopifyIdOf = new Map<string, string>();
+  for (const [shopifyId, id] of book.internalId) shopifyIdOf.set(id, shopifyId);
 
   const orders = await db.order.findMany({
-    select: { id: true, country: true, lineItems: { select: { id: true, variantId: true, quantity: true, price: true } } },
+    where: scope.productIds ? { lineItems: { some: { variant: { productId: { in: scope.productIds } } } } } : {},
+    select: {
+      id: true, country: true, total: true, cogs: true, shippingCost: true, handlingCost: true,
+      transactionFees: true, platformFees: true, feesEstimated: true,
+      lineItems: { select: { id: true, variantId: true, quantity: true, price: true, unitCost: true, shippingCost: true, costSource: true } },
+    },
   });
-  let updated = 0;
+
+  const lineRows: Prisma.Sql[] = [];
+  const orderRows: Prisma.Sql[] = [];
   for (const o of orders) {
     const result = costOrder(
       book,
@@ -54,19 +76,48 @@ export async function recostAllOrders(): Promise<number> {
         quantity: li.quantity,
         price: li.price,
       })),
-      settings?.defaultShippingCost ?? 0,
+      cfg.defaultShippingCost,
       o.country,
     );
-    await db.$transaction([
-      ...o.lineItems.map((li, i) =>
-        db.orderLineItem.update({
-          where: { id: li.id },
-          data: { unitCost: result.lines[i].unitCost, shippingCost: result.lines[i].shippingCost, costSource: result.lines[i].source },
-        }),
-      ),
-      db.order.update({ where: { id: o.id }, data: { cogs: result.cogs, shippingCost: result.shippingCost } }),
-    ]);
-    updated++;
+    o.lineItems.forEach((li, i) => {
+      const c = result.lines[i];
+      if (Math.abs(li.unitCost - c.unitCost) > 1e-9 || differs(li.shippingCost, c.shippingCost) || li.costSource !== c.source) {
+        lineRows.push(Prisma.sql`(${li.id}, ${c.unitCost}::float8, ${c.shippingCost}::float8, ${c.source})`);
+      }
+    });
+    const handlingCost = o.lineItems.length ? cfg.defaultHandlingCost : 0;
+    const platformFees = round2(o.total * (cfg.platformFeePercent / 100));
+    const transactionFees =
+      o.feesEstimated === true ? (o.total === 0 ? 0 : round2(o.total * (cfg.paymentFeePercent / 100) + cfg.paymentFeeFixed)) : o.transactionFees;
+    if (
+      differs(o.cogs, result.cogs) ||
+      differs(o.shippingCost, result.shippingCost) ||
+      differs(o.handlingCost, handlingCost) ||
+      differs(o.platformFees, platformFees) ||
+      differs(o.transactionFees, transactionFees)
+    ) {
+      orderRows.push(
+        Prisma.sql`(${o.id}, ${result.cogs}::float8, ${result.shippingCost}::float8, ${handlingCost}::float8, ${platformFees}::float8, ${transactionFees}::float8)`,
+      );
+    }
   }
-  return updated;
+
+  const CHUNK = 500;
+  const writes: Prisma.PrismaPromise<number>[] = [];
+  for (let i = 0; i < lineRows.length; i += CHUNK) {
+    writes.push(db.$executeRaw`
+      UPDATE "OrderLineItem" AS li
+      SET "unitCost" = v.u, "shippingCost" = v.s, "costSource" = v.c
+      FROM (VALUES ${Prisma.join(lineRows.slice(i, i + CHUNK))}) AS v(id, u, s, c)
+      WHERE li.id = v.id`);
+  }
+  for (let i = 0; i < orderRows.length; i += CHUNK) {
+    writes.push(db.$executeRaw`
+      UPDATE "Order" AS o
+      SET "cogs" = v.cogs, "shippingCost" = v.ship, "handlingCost" = v.handling, "platformFees" = v.platform, "transactionFees" = v.fees
+      FROM (VALUES ${Prisma.join(orderRows.slice(i, i + CHUNK))}) AS v(id, cogs, ship, handling, platform, fees)
+      WHERE o.id = v.id`);
+  }
+  if (writes.length) await db.$transaction(writes);
+  return { orders: orders.length, changed: orderRows.length };
 }

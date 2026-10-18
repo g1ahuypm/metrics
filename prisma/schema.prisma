@@ -98,7 +98,6 @@ model ProductVariant {
   variantTitle String?
   sku          String?
   price        Float    @default(0)   // price in Shopify
-  priceOverride Float?                // what you actually sell it for, if different (set in the app)
   // Cost of goods per unit. Pulled from Shopify InventoryItem.unitCost or
   // edited by hand in the Costs page (manual edits are kept on sync).
   unitCost     Float?
@@ -121,7 +120,6 @@ model CostTier {
   quantity     Int
   productCost  Float    @default(0)
   shippingCost Float    @default(0)
-  sellPrice    Float?                     // what this bundle sells for, if you want to override the observed average
   updatedAt    DateTime @updatedAt
 
   @@unique([productId, variantId, country, quantity])
@@ -151,6 +149,9 @@ model Order {
   shippingCost    Float     @default(0)   // what you paid to ship
   handlingCost    Float     @default(0)   // pick, pack, packaging
   transactionFees Float     @default(0)   // payment processing (Shopify Payments / gateway)
+  // true: estimated from the fee % in Expenses (re-priced when that changes);
+  // false: reported by Shopify; null: synced before this was tracked (left as is).
+  feesEstimated   Boolean?
   platformFees    Float     @default(0)   // Shopify's third-party gateway surcharge
 
   customerId      String?

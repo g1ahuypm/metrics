@@ -252,6 +252,7 @@ async function seedDemoData() {
           shippingCost: costed.shippingCost,
           handlingCost: round2(1.25 + (listTotal - 1) * 0.35),
           transactionFees,
+          feesEstimated: true,
           platformFees: 0,
           customerId,
           customerEmail: `customer${customerId.split("/").pop()}@example.com`,

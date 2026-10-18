@@ -104,9 +104,20 @@ export type OrderCostResult = {
  * any line is tier-priced; otherwise the per-order default shipping applies.
  */
 export function costOrder(book: CostBook, lines: OrderCostInput[], defaultShippingCost: number, country: string | null = null): OrderCostResult {
+  // The same variant on several lines (e.g. a post-purchase upsell adds a second
+  // line) ships together, so it is priced at the bundle tier for the combined quantity.
+  const qtyByVariant = new Map<string, number>();
+  for (const l of lines) if (l.variantShopifyId) qtyByVariant.set(l.variantShopifyId, (qtyByVariant.get(l.variantShopifyId) ?? 0) + l.quantity);
   const costed = lines.map((l) => {
-    const c = resolveLineCost(book, l.variantShopifyId, l.quantity, l.price, country);
-    return { ...c, unitCost: l.quantity > 0 ? round2(c.productCost / l.quantity) : 0 };
+    const combined = l.variantShopifyId ? (qtyByVariant.get(l.variantShopifyId) ?? l.quantity) : l.quantity;
+    let c = resolveLineCost(book, l.variantShopifyId, l.quantity, l.price, country);
+    if (c.source === "tier" && combined > l.quantity) {
+      const whole = resolveLineCost(book, l.variantShopifyId, combined, l.price, country);
+      const part = l.quantity / combined;
+      c = { productCost: whole.productCost * part, shippingCost: whole.shippingCost * part, source: "tier" };
+    }
+    // Not rounded: a $40 bundle of 3 must add back up to $40.00, not 3 × $13.33.
+    return { ...c, unitCost: l.quantity > 0 ? c.productCost / l.quantity : 0 };
   });
   const anyTier = costed.some((c) => c.source === "tier");
   const cogs = round2(costed.reduce((s, c) => s + c.productCost, 0));

@@ -8,6 +8,7 @@ import { encrypt } from "../crypto";
 import { normalizeAdAccount, normalizeDomain, type ShopifyAuth } from "../integrations/config";
 import { fetchClientCredentialsToken, testShopify } from "../integrations/shopify";
 import { testMeta } from "../integrations/meta";
+import { repriceOrders } from "../costbook";
 import type { FormState } from "./auth";
 
 export async function updateGeneralSettingsAction(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -59,8 +60,9 @@ export async function updateCostAssumptionsAction(_prev: FormState, formData: Fo
     update: parsed.data,
     create: { id: "default", ...parsed.data },
   });
+  const { orders } = await repriceOrders();
   revalidatePath("/", "layout");
-  return { success: "Cost assumptions saved. They apply to orders synced from now on." };
+  return { success: `Saved · ${orders} order${orders === 1 ? "" : "s"} updated` };
 }
 
 export async function connectShopifyAction(_prev: FormState, formData: FormData): Promise<FormState> {

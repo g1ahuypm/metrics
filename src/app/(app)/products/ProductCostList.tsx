@@ -1,13 +1,13 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, Gift, Info, Loader2, Plus, RefreshCw, Search, Trash2, Undo2 } from "lucide-react";
-import { clearVariantTiersAction, recostOrdersAction, saveTiersAction, type TierInput } from "@/lib/actions/costs";
+import { Check, ChevronDown, ChevronRight, Copy, Gift, Info, Loader2, Plus, Search, Trash2, Undo2 } from "lucide-react";
+import { clearVariantTiersAction, saveTiersAction, type TierInput } from "@/lib/actions/costs";
 import { resolveTier } from "@/lib/costing";
 import { MARKETS, marketLabel } from "@/lib/constants";
 import { fmtMoney, fmtNumber, fmtPercent, safeDiv } from "@/lib/format";
 
-export type TierRow = { quantity: number; productCost: number; shippingCost: number; sellPrice: number | null };
+export type TierRow = { quantity: number; productCost: number; shippingCost: number };
 /** Observed average net price per bundle size, from real orders. */
 export type SoldPrices = Record<number, { avg: number; count: number }>;
 /** Tiers keyed by country code; "" is the default used for any other country. */
@@ -43,8 +43,6 @@ const hasAny = (t: TiersByCountry) => Object.values(t).some((x) => x.length > 0)
 export function ProductCostList({ products, currency, editor }: { products: ProductCostData[]; currency: string; editor: boolean }) {
   const [query, setQuery] = useState("");
   const [onlyMissing, setOnlyMissing] = useState(false);
-  const [recosting, startRecost] = useTransition();
-  const [recostMsg, setRecostMsg] = useState<string | null>(null);
 
   const isMissing = (p: ProductCostData) => !hasAny(p.tiers) && p.variants.some((v) => !hasAny(v.tiers));
 
@@ -73,6 +71,9 @@ export function ProductCostList({ products, currency, editor }: { products: Prod
             <strong className="text-ink">Default</strong> costs apply everywhere. Fill in a country tab (US, CA, AU, UK, NZ) when that
             country costs something different. Each order is priced by the country it ships to.
           </p>
+          <p className="mt-1">
+            Saving updates every past order with this product right away, on every page.
+          </p>
         </div>
       </div>
 
@@ -87,26 +88,6 @@ export function ProductCostList({ products, currency, editor }: { products: Prod
             Missing costs only {missingCount > 0 && <span className="badge text-warn-text">{missingCount}</span>}
           </label>
         </div>
-        {editor && (
-          <div className="flex items-center gap-2">
-            {recostMsg && <span className="text-xs text-ink-3">{recostMsg}</span>}
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={recosting}
-              onClick={() =>
-                startRecost(async () => {
-                  const r = await recostOrdersAction();
-                  setRecostMsg(`Re-priced ${r.orders} orders`);
-                })
-              }
-              title="Re-price every past order with the costs below"
-            >
-              {recosting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Apply to past orders
-            </button>
-          </div>
-        )}
       </div>
 
       <div className="space-y-3">
@@ -230,7 +211,7 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
           </span>
         </div>
         <TierEditor
-          key={`p-${product.productId}-${country}-${currentTiers.length}`}
+          key={`p-${product.productId}-${country}`}
           productId={product.productId}
           variantId=""
           country={country}
@@ -272,6 +253,7 @@ function VariantSection({
   const own = variant.tiers[country] ?? [];
   const [customizing, setCustomizing] = useState(own.length > 0);
   const [pending, start] = useTransition();
+  const [msg, setMsg] = useState<string | null>(null);
   const template = own.length ? [] : product.tiers[country] ?? product.tiers[""] ?? [];
   return (
     <div className="px-4 py-3">
@@ -294,8 +276,10 @@ function VariantSection({
             disabled={pending}
             onClick={() =>
               start(async () => {
-                await clearVariantTiersAction(product.productId, variant.shopifyId, country);
+                const r = await clearVariantTiersAction(product.productId, variant.shopifyId, country);
                 setCustomizing(false);
+                setMsg(r?.success ?? null);
+                setTimeout(() => setMsg(null), 5000);
               })
             }
           >
@@ -306,7 +290,7 @@ function VariantSection({
       {customizing ? (
         <div className="mt-2">
           <TierEditor
-            key={`v-${variant.id}-${country}-${own.length}`}
+            key={`v-${variant.id}-${country}`}
             productId={product.productId}
             variantId={variant.shopifyId}
             country={country}
@@ -321,7 +305,9 @@ function VariantSection({
           />
         </div>
       ) : (
-        <p className="mt-1 text-xs text-ink-3">Uses the product costs above.</p>
+        <p className="mt-1 text-xs text-ink-3">
+          Uses the product costs above.{msg && <span className="ml-2 text-good-text">{msg}</span>}
+        </p>
       )}
     </div>
   );
@@ -356,8 +342,8 @@ function TierEditor({
   heading: string;
 }) {
   const toRows = (t: TierRow[]) =>
-    t.map((x) => ({ quantity: String(x.quantity), productCost: String(x.productCost), shippingCost: String(x.shippingCost), sellPrice: x.sellPrice === null ? "" : String(x.sellPrice) }));
-  const blank = { quantity: "1", productCost: "", shippingCost: "", sellPrice: "" };
+    t.map((x) => ({ quantity: String(x.quantity), productCost: String(x.productCost), shippingCost: String(x.shippingCost) }));
+  const blank = { quantity: "1", productCost: "", shippingCost: "" };
   const [rows, setRows] = useState(() => (initial.length ? toRows(initial) : [blank]));
   const [saved, setSaved] = useState<TierRow[]>(initial);
   const [pending, start] = useTransition();
@@ -368,15 +354,13 @@ function TierEditor({
       quantity: Number(r.quantity),
       productCost: Number(r.productCost || 0),
       shippingCost: Number(r.shippingCost || 0),
-      sellPrice: r.sellPrice === "" ? null : Number(r.sellPrice),
     }))
     .filter((r) => Number.isInteger(r.quantity) && r.quantity > 0);
   const dirty =
     JSON.stringify(parsed) !==
-    JSON.stringify(saved.map((t) => ({ quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost, sellPrice: t.sellPrice })));
-  /** What a bundle of q units sells for: your override, else the average from orders, else list price × q. */
-  const sellsFor = (q: number, override: string) => {
-    if (override !== "") return { value: Number(override), source: "override" as const };
+    JSON.stringify(saved.map((t) => ({ quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost })));
+  /** What customers pay for a bundle of q units: the average of real orders (what the P&L uses), else list price × q. */
+  const paidFor = (q: number) => {
     const obs = soldPrices[q];
     if (obs && obs.count > 0) return { value: obs.avg, source: "orders" as const };
     return { value: price * q, source: "list" as const };
@@ -394,9 +378,9 @@ function TierEditor({
       const r = await saveTiersAction(productId, variantId, parsed, country);
       if (r?.error) setMsg({ ok: false, text: r.error });
       else {
-        setSaved(parsed.map((t) => ({ ...t, sellPrice: t.sellPrice ?? null })));
+        setSaved(parsed);
         setMsg({ ok: true, text: r?.success ?? "Saved" });
-        setTimeout(() => setMsg(null), 2000);
+        setTimeout(() => setMsg(null), 5000);
       }
     });
   }
@@ -430,7 +414,7 @@ function TierEditor({
               <th className="py-1 pr-3 font-medium">Shipping</th>
               <th className="py-1 pr-3 text-right font-medium">Total cost</th>
               <th className="py-1 pr-3 text-right font-medium">Per unit</th>
-              <th className="py-1 pr-3 text-right font-medium">Sells for</th>
+              <th className="py-1 pr-3 text-right font-medium">Customers paid</th>
               <th className="py-1 pr-3 text-right font-medium">Profit</th>
               <th className="py-1 pr-3 text-right font-medium">Margin</th>
               {editor && <th className="py-1"></th>}
@@ -440,9 +424,8 @@ function TierEditor({
             {rows.map((r, i) => {
               const q = Number(r.quantity) || 0;
               const total = Number(r.productCost || 0) + Number(r.shippingCost || 0);
-              const sf = sellsFor(q, r.sellPrice);
-              const sells = sf.value;
-              const obs = soldPrices[q];
+              const paid = paidFor(q);
+              const sells = paid.value;
               const margin = safeDiv(sells - total, sells);
               return (
                 <tr key={i} className="border-t border-border">
@@ -461,19 +444,9 @@ function TierEditor({
                   <td className="py-1.5 pr-3 text-right tnum font-medium">{fmtMoney(total, currency)}</td>
                   <td className="py-1.5 pr-3 text-right tnum text-ink-2">{q > 0 ? fmtMoney(total / q, currency) : "—"}</td>
                   <td className="py-1.5 pr-3 text-right">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      className="input w-28 py-1 text-right tnum"
-                      placeholder={sf.source === "orders" ? String(obs?.avg ?? "") : String(price * q)}
-                      value={r.sellPrice}
-                      readOnly={!editor}
-                      onChange={(e) => update(i, "sellPrice", e.target.value)}
-                      title={sf.source === "orders" ? `Average paid across ${obs?.count} orders. Type a price to override.` : "No orders at this quantity yet; list price shown. Type what it sells for."}
-                    />
-                    <div className="mt-0.5 text-[10px] text-ink-3">
-                      {sf.source === "override" ? `your price · orders avg ${obs ? fmtMoney(obs.avg, currency) : "n/a"}` : sf.source === "orders" ? `avg of ${obs?.count} orders` : "list price"}
+                    <div className={`tnum ${paid.source === "orders" ? "font-medium" : "text-ink-3"}`}>{fmtMoney(sells, currency)}</div>
+                    <div className="text-[10px] text-ink-3">
+                      {paid.source === "orders" ? `avg of ${soldPrices[q].count} order${soldPrices[q].count === 1 ? "" : "s"}` : "list price · no orders yet"}
                     </div>
                   </td>
                   <td className={`py-1.5 pr-3 text-right tnum font-medium ${sells - total < 0 ? "text-bad-text" : ""}`}>{fmtMoney(sells - total, currency)}</td>
@@ -491,6 +464,10 @@ function TierEditor({
           </tbody>
         </table>
       </div>
+      <p className="mt-1.5 text-[11px] text-ink-3">
+        Customers paid is the average of your real orders at each bundle size, after discounts. It is the same number your Profit &amp; Loss uses.
+        To change it, change the price or discount in Shopify.
+      </p>
       {editor && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button type="button" className="btn-ghost text-xs" onClick={() => setRows((rs) => [...rs, { ...blank, quantity: String(nextQty) }])}>
@@ -504,14 +481,14 @@ function TierEditor({
               title="Digital downloads, free bonuses, gifts"
               onClick={() =>
                 start(async () => {
-                  const zero = [{ quantity: 1, productCost: 0, shippingCost: 0, sellPrice: null }];
+                  const zero = [{ quantity: 1, productCost: 0, shippingCost: 0 }];
                   const r = await saveTiersAction(productId, variantId, zero, country);
                   if (r?.error) setMsg({ ok: false, text: r.error });
                   else {
                     setRows(toRows(zero));
                     setSaved(zero);
-                    setMsg({ ok: true, text: "Marked as no cost" });
-                    setTimeout(() => setMsg(null), 2000);
+                    setMsg({ ok: true, text: r?.success ?? "Saved" });
+                    setTimeout(() => setMsg(null), 5000);
                   }
                 })
               }
@@ -537,8 +514,8 @@ function TierEditor({
                   else {
                     setSaved([]);
                     setRows([blank]);
-                    setMsg({ ok: true, text: "Back to default costs" });
-                    setTimeout(() => setMsg(null), 2000);
+                    setMsg({ ok: true, text: r?.success ?? "Back to default costs" });
+                    setTimeout(() => setMsg(null), 5000);
                   }
                 })
               }

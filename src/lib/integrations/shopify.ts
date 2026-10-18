@@ -1,9 +1,9 @@
 import "server-only";
 import { subDays } from "date-fns";
 import { db } from "../db";
-import { costOrder } from "../costing";
+import { costOrder, round2 } from "../costing";
 import { countryFromCurrency } from "../constants";
-import { loadCostBook } from "../costbook";
+import { loadCostBook, repriceOrders } from "../costbook";
 import { decrypt, encrypt } from "../crypto";
 import type { IntegrationConfig, ShopifyAuth } from "./config";
 
@@ -24,6 +24,7 @@ type ShopifyOrder = {
   tags: string[];
   currentSubtotalPriceSet: Money;
   currentTotalPriceSet: Money;
+  totalPriceSet: Money;
   currentTotalTaxSet: Money;
   currentTotalDiscountsSet: Money;
   totalShippingPriceSet: Money;
@@ -37,6 +38,7 @@ type ShopifyOrder = {
       title: string;
       sku: string | null;
       quantity: number;
+      currentQuantity: number;
       originalTotalSet: Money;
       discountAllocations: { allocatedAmountSet: Money }[];
       variant: { id: string; inventoryItem: { unitCost: { amount: string } | null } | null } | null;
@@ -195,6 +197,7 @@ query Orders($cursor: String, $query: String) {
       displayFinancialStatus displayFulfillmentStatus currencyCode presentmentCurrencyCode sourceName tags
       currentSubtotalPriceSet { shopMoney { amount } }
       currentTotalPriceSet { shopMoney { amount } }
+      totalPriceSet { shopMoney { amount } }
       currentTotalTaxSet { shopMoney { amount } }
       currentTotalDiscountsSet { shopMoney { amount } }
       totalShippingPriceSet { shopMoney { amount } }
@@ -202,7 +205,7 @@ query Orders($cursor: String, $query: String) {
       __CUSTOMER__
       lineItems(first: 100) {
         nodes {
-          id title sku quantity
+          id title sku quantity currentQuantity
           originalTotalSet { shopMoney { amount } }
           discountAllocations { allocatedAmountSet { shopMoney { amount } } }
           variant { id inventoryItem { unitCost { amount } } }
@@ -290,27 +293,34 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
         }
       }
       const country = o.shippingAddress?.countryCodeV2 ?? countryFromCurrency(o.presentmentCurrencyCode) ?? null;
+      // Lines as the order stands now: items removed in an order edit (or refunded) have
+      // a lower currentQuantity, matching Shopify's current subtotal. Cancelled orders keep
+      // their original lines for reference; they are left out of every report.
+      type Line = ShopifyOrder["lineItems"]["nodes"][number];
+      const qtyOf = (li: Line) => (o.cancelledAt ? li.quantity : li.currentQuantity);
+      const nodes = o.lineItems.nodes.filter((li) => qtyOf(li) > 0);
+      const keep = (li: Line) => (li.quantity > 0 ? qtyOf(li) / li.quantity : 0);
       // Shopify's discountedTotalSet leaves out order-level discounts (e.g. "Buy 2"
       // automatic discounts), so compute what the customer really paid per line.
-      const netLine = (li: ShopifyOrder["lineItems"]["nodes"][number]) =>
-        Math.max(0, Math.round((num(li.originalTotalSet) - li.discountAllocations.reduce((s, a) => s + num(a.allocatedAmountSet), 0)) * 100) / 100);
+      const netLine = (li: Line) =>
+        Math.max(0, Math.round((num(li.originalTotalSet) - li.discountAllocations.reduce((s, a) => s + num(a.allocatedAmountSet), 0)) * keep(li) * 100) / 100);
       const costed = costOrder(
         book,
-        o.lineItems.nodes.map((li) => ({
+        nodes.map((li) => ({
           variantShopifyId: li.variant?.id ?? null,
-          quantity: li.quantity,
+          quantity: qtyOf(li),
           price: netLine(li),
         })),
         cfg.defaultShippingCost,
         country,
       );
-      const lineItems = o.lineItems.nodes.map((li, i) => ({
+      const lineItems = nodes.map((li, i) => ({
         shopifyId: li.id,
         variantId: li.variant ? (book.internalId.get(li.variant.id) ?? null) : null,
         title: li.title,
         sku: li.sku,
-        quantity: li.quantity,
-        listPrice: num(li.originalTotalSet),
+        quantity: qtyOf(li),
+        listPrice: Math.round(num(li.originalTotalSet) * keep(li) * 100) / 100,
         price: netLine(li),
         unitCost: costed.lines[i].unitCost,
         shippingCost: costed.lines[i].shippingCost,
@@ -323,11 +333,9 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
       const feeFromShopify = o.transactions
         .filter((t) => t.status === "SUCCESS" && (t.kind === "SALE" || t.kind === "CAPTURE"))
         .reduce((s, t) => s + t.fees.reduce((fs, f) => fs + Number(f.amount.amount), 0), 0);
-      const transactionFees =
-        feeFromShopify > 0 || total === 0
-          ? feeFromShopify
-          : total * (cfg.paymentFeePercent / 100) + cfg.paymentFeeFixed;
-      const platformFees = total * (cfg.platformFeePercent / 100);
+      const feesEstimated = !(feeFromShopify > 0 || total === 0);
+      const transactionFees = feesEstimated ? round2(total * (cfg.paymentFeePercent / 100) + cfg.paymentFeeFixed) : feeFromShopify;
+      const platformFees = round2(total * (cfg.platformFeePercent / 100));
 
       const base = {
         name: o.name,
@@ -342,11 +350,14 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
         tax: num(o.currentTotalTaxSet),
         discounts: num(o.currentTotalDiscountsSet),
         total,
-        refunded: num(o.totalRefundedSet),
+        // The current totals already exclude refunded items, so only count money returned
+        // beyond that (e.g. a goodwill refund with no item) to avoid subtracting it twice.
+        refunded: round2(Math.max(0, num(o.totalRefundedSet) - (num(o.totalPriceSet) - total))),
         cogs,
         shippingCost: costed.shippingCost,
-        handlingCost: cfg.defaultHandlingCost,
+        handlingCost: nodes.length ? cfg.defaultHandlingCost : 0,
         transactionFees,
+        feesEstimated,
         platformFees,
         customerId: o.customer?.id ?? null,
         customerEmail: null,
@@ -403,6 +414,9 @@ export async function syncShopify(cfg: IntegrationConfig, opts: { full?: boolean
   // Custom apps can read 60 days of orders, so the first (or a full) run asks for exactly that.
   const since = cfg.lastShopifySyncAt && !opts.full ? subDays(cfg.lastShopifySyncAt, 3) : subDays(new Date(), 60);
   const orders = await syncShopifyOrders(cfg, since);
+  // Older orders were not re-pulled; bring them in line with any cost changes
+  // (e.g. a new Shopify cost per item). Only rows that change are written.
+  await repriceOrders();
   await db.settings.update({ where: { id: "default" }, data: { lastShopifySyncAt: new Date() } });
   return { variants, orders };
 }
