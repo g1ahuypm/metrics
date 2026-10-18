@@ -2,6 +2,9 @@ import Link from "next/link";
 import { hasAnyUsers } from "@/lib/auth";
 import { LoginForm } from "./LoginForm";
 
+// Reads the database on every request; must not be baked in at build time.
+export const dynamic = "force-dynamic";
+
 export default async function LoginPage() {
   const usersExist = await hasAnyUsers();
   return (

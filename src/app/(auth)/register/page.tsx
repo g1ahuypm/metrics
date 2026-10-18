@@ -2,6 +2,9 @@ import { redirect } from "next/navigation";
 import { hasAnyUsers } from "@/lib/auth";
 import { RegisterForm } from "./RegisterForm";
 
+// Reads the database on every request; must not be baked in at build time.
+export const dynamic = "force-dynamic";
+
 export default async function RegisterPage() {
   if (await hasAnyUsers()) redirect("/login");
   return (
