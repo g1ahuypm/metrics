@@ -126,8 +126,10 @@ store-wide revenue; $0 lines of other products in the same order are treated as 
    and true ROAS/CPA → adjust costs → numbers update live. Fewer tiles, clearer
    hierarchy, consistent terminology (Revenue = what customers paid), no demo-data
    banner on a connected store, nothing that needs explaining.
-4. The Meta connection on the live app may not be finished; confirm in Settings.
-5. After the net-price fix the owner must run **Full resync (60 days)** once and
+4. ~~Meta connection~~ **Confirmed by the owner on the live app (Oct 18, 2026):** Meta
+   connected and synced, campaigns ticked on the product page, numbers checked.
+5. **Done (owner confirmed Oct 18, 2026):** Full resync run, live numbers checked
+   against Shopify and Meta. Original note: after the net-price fix the owner must run **Full resync (60 days)** once and
    then re-price orders; confirm the live numbers afterwards against Shopify
    (e.g. order #LW001289 should show the book line at $84.95, not $169.98).
 
