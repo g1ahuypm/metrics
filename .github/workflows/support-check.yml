@@ -23,7 +23,7 @@ jobs:
           APP_URL: ${{ vars.APP_URL || 'https://metrics-azure.vercel.app' }}
         run: |
           if [ -z "$CRON_SECRET" ]; then
-            echo "Add a repository secret named CRON_SECRET (same value as in Vercel)."
-            exit 1
+            echo "::notice::Not set up yet: add a repository secret named CRON_SECRET (same value as in Vercel)."
+            exit 0
           fi
           curl --fail-with-body -sS --max-time 90 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/support"
