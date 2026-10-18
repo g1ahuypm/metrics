@@ -1,7 +1,7 @@
 import "server-only";
 import { subDays } from "date-fns";
 import { db } from "../db";
-import { costOrder, round2 } from "../costing";
+import { costOrder, round2, uncostedOrder } from "../costing";
 import { countryFromCurrency } from "../constants";
 import { loadCostBook, repriceOrders } from "../costbook";
 import { decrypt, encrypt } from "../crypto";
@@ -25,6 +25,10 @@ type ShopifyOrder = {
   currentSubtotalPriceSet: Money;
   currentTotalPriceSet: Money;
   totalPriceSet: Money;
+  subtotalPriceSet: Money;
+  totalTaxSet: Money;
+  totalDiscountsSet: Money;
+  currentShippingPriceSet: Money;
   currentTotalTaxSet: Money;
   currentTotalDiscountsSet: Money;
   totalShippingPriceSet: Money;
@@ -198,6 +202,10 @@ query Orders($cursor: String, $query: String) {
       currentSubtotalPriceSet { shopMoney { amount } }
       currentTotalPriceSet { shopMoney { amount } }
       totalPriceSet { shopMoney { amount } }
+      subtotalPriceSet { shopMoney { amount } }
+      totalTaxSet { shopMoney { amount } }
+      totalDiscountsSet { shopMoney { amount } }
+      currentShippingPriceSet { shopMoney { amount } }
       currentTotalTaxSet { shopMoney { amount } }
       currentTotalDiscountsSet { shopMoney { amount } }
       totalShippingPriceSet { shopMoney { amount } }
@@ -284,7 +292,11 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
     }
 
     for (const o of data.orders.nodes) {
-      const total = num(o.currentTotalPriceSet);
+      // Like Shopify's sales reports: a live order counts at its current totals (after
+      // edits and refunds); a cancelled one at what was charged, less refunds below,
+      // so cancelled-and-refunded nets to zero but cancelled-not-refunded still counts.
+      const cancelled = Boolean(o.cancelledAt);
+      const total = num(cancelled ? o.totalPriceSet : o.currentTotalPriceSet);
       // A variant seen on an order but not yet in the cost book (new product) falls back to
       // the unit cost Shopify reports on the line itself.
       for (const li of o.lineItems.nodes) {
@@ -295,7 +307,7 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
       const country = o.shippingAddress?.countryCodeV2 ?? countryFromCurrency(o.presentmentCurrencyCode) ?? null;
       // Lines as the order stands now: items removed in an order edit (or refunded) have
       // a lower currentQuantity, matching Shopify's current subtotal. Cancelled orders keep
-      // their original lines for reference; they are left out of every report.
+      // their original lines (to match the subtotal above) but carry no costs: nothing shipped.
       type Line = ShopifyOrder["lineItems"]["nodes"][number];
       const qtyOf = (li: Line) => (o.cancelledAt ? li.quantity : li.currentQuantity);
       const nodes = o.lineItems.nodes.filter((li) => qtyOf(li) > 0);
@@ -304,16 +316,8 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
       // automatic discounts), so compute what the customer really paid per line.
       const netLine = (li: Line) =>
         Math.max(0, Math.round((num(li.originalTotalSet) - li.discountAllocations.reduce((s, a) => s + num(a.allocatedAmountSet), 0)) * keep(li) * 100) / 100);
-      const costed = costOrder(
-        book,
-        nodes.map((li) => ({
-          variantShopifyId: li.variant?.id ?? null,
-          quantity: qtyOf(li),
-          price: netLine(li),
-        })),
-        cfg.defaultShippingCost,
-        country,
-      );
+      const costInput = nodes.map((li) => ({ variantShopifyId: li.variant?.id ?? null, quantity: qtyOf(li), price: netLine(li) }));
+      const costed = cancelled ? uncostedOrder(costInput) : costOrder(book, costInput, cfg.defaultShippingCost, country);
       const lineItems = nodes.map((li, i) => ({
         shopifyId: li.id,
         variantId: li.variant ? (book.internalId.get(li.variant.id) ?? null) : null,
@@ -345,17 +349,17 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
         financialStatus: o.displayFinancialStatus,
         fulfillmentStatus: o.displayFulfillmentStatus,
         currency: o.currencyCode,
-        subtotal: num(o.currentSubtotalPriceSet),
-        shippingCharged: num(o.totalShippingPriceSet),
-        tax: num(o.currentTotalTaxSet),
-        discounts: num(o.currentTotalDiscountsSet),
+        subtotal: num(cancelled ? o.subtotalPriceSet : o.currentSubtotalPriceSet),
+        shippingCharged: num(cancelled ? o.totalShippingPriceSet : o.currentShippingPriceSet),
+        tax: num(cancelled ? o.totalTaxSet : o.currentTotalTaxSet),
+        discounts: num(cancelled ? o.totalDiscountsSet : o.currentTotalDiscountsSet),
         total,
         // The current totals already exclude refunded items, so only count money returned
         // beyond that (e.g. a goodwill refund with no item) to avoid subtracting it twice.
         refunded: round2(Math.max(0, num(o.totalRefundedSet) - (num(o.totalPriceSet) - total))),
         cogs,
         shippingCost: costed.shippingCost,
-        handlingCost: nodes.length ? cfg.defaultHandlingCost : 0,
+        handlingCost: nodes.length && !cancelled ? cfg.defaultHandlingCost : 0,
         transactionFees,
         feesEstimated,
         platformFees,
@@ -409,6 +413,10 @@ export async function recomputeNewCustomers(): Promise<void> {
 }
 
 export async function syncShopify(cfg: IntegrationConfig, opts: { full?: boolean } = {}): Promise<{ variants: number; orders: number }> {
+  if (!cfg.shopify) throw new Error("Shopify is not connected");
+  // Reports split days in the store's own timezone, exactly like Shopify Analytics.
+  const shop = await shopifyGraphQL<{ shop: { ianaTimezone: string; currencyCode: string } }>(cfg.shopify, `{ shop { ianaTimezone currencyCode } }`);
+  await db.settings.update({ where: { id: "default" }, data: { timezone: shop.shop.ianaTimezone, currency: shop.shop.currencyCode } });
   const variants = await syncShopifyVariants(cfg);
   // Re-pull the last few days on every run so refunds and edits are captured.
   // Custom apps can read 60 days of orders, so the first (or a full) run asks for exactly that.

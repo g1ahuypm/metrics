@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "./db";
-import { daysInUtcMonth, eachDay, endOfUtcDay, toISODate, utcDay, type DateRange } from "./dates";
+import { dayEnd, dayStart, daysInUtcMonth, eachDay, endOfUtcDay, storeDate, toISODate, utcDay, type DateRange } from "./dates";
 import { safeDiv } from "./format";
 
 /** Round to cents so sums of many floating-point values never show drift. */
@@ -160,9 +160,14 @@ const orderSelect = {
   isNewCustomer: true,
 } as const;
 
-async function loadOrderSlices(from: Date, toEnd: Date, productId?: string): Promise<OrderSlice[]> {
+/**
+ * Orders placed in [start, end). Cancelled orders are included like Shopify's
+ * reports do: the sync stores what the customer was charged minus refunds and no
+ * product or shipping cost, so one cancelled and refunded nets to zero.
+ */
+async function loadOrderSlices(start: Date, end: Date, productId?: string): Promise<OrderSlice[]> {
   if (!productId) {
-    const orders = await db.order.findMany({ where: { createdAt: { gte: from, lte: toEnd }, cancelledAt: null }, select: orderSelect });
+    const orders = await db.order.findMany({ where: { createdAt: { gte: start, lt: end } }, select: orderSelect });
     return orders.map((o) => ({
       createdAt: o.createdAt,
       grossSales: o.subtotal + o.discounts,
@@ -184,7 +189,7 @@ async function loadOrderSlices(from: Date, toEnd: Date, productId?: string): Pro
   // cost, tier shipping) are exact; order-level amounts (tax, shipping charged,
   // fees, refunds, discounts, handling) are split by the product's share of the order.
   const orders = await db.order.findMany({
-    where: { createdAt: { gte: from, lte: toEnd }, cancelledAt: null, lineItems: { some: { variant: { productId } } } },
+    where: { createdAt: { gte: start, lt: end }, lineItems: { some: { variant: { productId } } } },
     select: {
       ...orderSelect,
       lineItems: { select: { price: true, listPrice: true, quantity: true, unitCost: true, shippingCost: true, costSource: true, variant: { select: { productId: true } } } },
@@ -217,13 +222,16 @@ async function loadOrderSlices(from: Date, toEnd: Date, productId?: string): Pro
   });
 }
 
-async function loadDaily(from: Date, to: Date, productId?: string): Promise<DailyPoint[]> {
+async function loadDaily(from: Date, to: Date, tz: string, productId?: string): Promise<DailyPoint[]> {
   const days = eachDay(from, to);
   const map = new Map<string, DailyPoint>(days.map((d) => [d, emptyDay(d)]));
   const toEnd = endOfUtcDay(to);
+  // Orders are bucketed by the store's calendar day; ad insights and expenses are already calendar dates.
+  const start = dayStart(from, tz);
+  const end = dayEnd(to, tz);
 
   const [orders, insights, customCosts, totalRevenueByDay] = await Promise.all([
-    loadOrderSlices(from, toEnd, productId),
+    loadOrderSlices(start, end, productId),
     db.adInsight.findMany({
       where: { date: { gte: from, lte: toEnd }, ...(productId ? { campaign: { productId } } : {}) },
       select: {
@@ -237,11 +245,11 @@ async function loadDaily(from: Date, to: Date, productId?: string): Promise<Dail
     // Store-wide revenue per day, used to allocate shared expenses to a product.
     productId
       ? db.order
-          .findMany({ where: { createdAt: { gte: from, lte: toEnd }, cancelledAt: null }, select: { createdAt: true, total: true, refunded: true } })
+          .findMany({ where: { createdAt: { gte: start, lt: end } }, select: { createdAt: true, total: true, refunded: true } })
           .then((rows) => {
             const m = new Map<string, number>();
             for (const r of rows) {
-              const k = toISODate(utcDay(r.createdAt));
+              const k = storeDate(r.createdAt, tz);
               m.set(k, (m.get(k) ?? 0) + r.total - r.refunded);
             }
             return m;
@@ -250,7 +258,7 @@ async function loadDaily(from: Date, to: Date, productId?: string): Promise<Dail
   ]);
 
   for (const o of orders) {
-    const d = map.get(toISODate(utcDay(o.createdAt)));
+    const d = map.get(storeDate(o.createdAt, tz));
     if (!d) continue;
     d.grossSales += o.grossSales;
     d.discounts += o.discounts;
@@ -364,8 +372,8 @@ export type MetricsReport = {
 
 export async function getMetrics(range: DateRange, productId?: string): Promise<MetricsReport> {
   const [daily, prevDaily] = await Promise.all([
-    loadDaily(range.from, range.to, productId),
-    loadDaily(range.prevFrom, range.prevTo, productId),
+    loadDaily(range.from, range.to, range.tz, productId),
+    loadDaily(range.prevFrom, range.prevTo, range.tz, productId),
   ]);
   return { range, daily, totals: summarize(daily), previous: summarize(prevDaily) };
 }
@@ -457,7 +465,7 @@ export type ProductRow = {
 export async function getProductBreakdown(range: DateRange, productId?: string): Promise<ProductRow[]> {
   const items = await db.orderLineItem.findMany({
     where: {
-      order: { createdAt: { gte: range.from, lte: endOfUtcDay(range.to) }, cancelledAt: null },
+      order: { createdAt: { gte: dayStart(range.from, range.tz), lt: dayEnd(range.to, range.tz) } },
       ...(productId ? { variant: { productId } } : {}),
     },
     include: { variant: { select: { productTitle: true, variantTitle: true, unitCost: true } } },
@@ -496,7 +504,7 @@ export async function getProductBreakdown(range: DateRange, productId?: string):
 export async function getRecentOrders(range: DateRange, limit = 50, productId?: string) {
   return db.order.findMany({
     where: {
-      createdAt: { gte: range.from, lte: endOfUtcDay(range.to) },
+      createdAt: { gte: dayStart(range.from, range.tz), lt: dayEnd(range.to, range.tz) },
       ...(productId ? { lineItems: { some: { variant: { productId } } } } : {}),
     },
     orderBy: { createdAt: "desc" },

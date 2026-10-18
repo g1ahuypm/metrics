@@ -60,9 +60,8 @@ owner's expectations as of the last session.
   Meta Ads: KPIs, charts, campaign table with a **"Sells product"** dropdown per
   campaign (editors only) + "Auto-link by name". Product view uses only linked campaigns.
 - Product costs: per product, country tabs (US/CA/AU/UK/NZ, no default), tier rows per
-  bundle quantity (product cost, shipping, total, per unit, **customers paid** = average of
-  real orders at that bundle size to that country, profit, margin), per-variant
-  overrides, "No cost (digital or bonus)". Saving re-prices affected orders immediately. Free-gift products (always $0 in orders) are
+  bundle quantity (product cost, shipping, total, per unit), per-variant overrides,
+  "No cost (digital or bonus)". Saving re-prices affected orders immediately. Free-gift products (always $0 in orders) are
   flagged; their cost is charged to the paid product in the same order.
 - Expenses: custom costs (monthly/daily/one-time/% revenue/per order) + per-order
   assumptions (payment fee %, fixed fee, Shopify platform fee %, shipping, handling,
@@ -104,7 +103,13 @@ store-wide revenue; $0 lines of other products in the same order are treated as 
    there is no default). The "Default" tab is gone; country tabs show green (set) / amber
    (sold there, no costs). Tiers under country "" remain only for "No cost (digital or
    bonus)" ($0 everywhere) or as older all-country costs, which the card flags with a
-   "Remove them" button. "Customers paid" is per country, falling back to all countries.
+   "Remove them" button. The page shows costs only (no selling price, no averages):
+   the owner was explicit that selling price does not belong there.
+   **Revenue matches Shopify Analytics to the cent** (verified Oct 11–17, 7/7 days, against
+   ShopifyQL `total_sales`): days are split in the store timezone (`Settings.timezone`, set
+   from Shopify `shop.ianaTimezone` on every sync; `src/lib/dates.ts` dayStart/storeDate),
+   and cancelled orders count like Shopify does (charged − refunded, no product/shipping
+   cost), e.g. #LW001286 was cancelled but not refunded and Shopify counts its $66.94.
 2. **Product ↔ campaign linking is confusing.** "Sells product" is only visible on
    the Meta Ads campaign table when campaigns have synced; the owner could not find
    it. Required: a first-class, obvious way to link campaigns to a product (e.g. on

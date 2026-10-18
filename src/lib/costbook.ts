@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "./db";
 import { Prisma } from "@prisma/client";
-import { costOrder, round2, tierKey, type CostBook, type Tier } from "./costing";
+import { costOrder, round2, tierKey, uncostedOrder, type CostBook, type Tier } from "./costing";
 
 /** Loads every cost tier and variant cost into memory for fast order costing. */
 export async function loadCostBook(fallbackCogsPercent: number): Promise<CostBook> {
@@ -60,7 +60,7 @@ export async function repriceOrders(scope: { productIds?: string[] } = {}): Prom
   const orders = await db.order.findMany({
     where: scope.productIds ? { lineItems: { some: { variant: { productId: { in: scope.productIds } } } } } : {},
     select: {
-      id: true, country: true, total: true, cogs: true, shippingCost: true, handlingCost: true,
+      id: true, country: true, cancelledAt: true, total: true, cogs: true, shippingCost: true, handlingCost: true,
       transactionFees: true, platformFees: true, feesEstimated: true,
       lineItems: { select: { id: true, variantId: true, quantity: true, price: true, unitCost: true, shippingCost: true, costSource: true } },
     },
@@ -69,23 +69,20 @@ export async function repriceOrders(scope: { productIds?: string[] } = {}): Prom
   const lineRows: Prisma.Sql[] = [];
   const orderRows: Prisma.Sql[] = [];
   for (const o of orders) {
-    const result = costOrder(
-      book,
-      o.lineItems.map((li) => ({
-        variantShopifyId: li.variantId ? (shopifyIdOf.get(li.variantId) ?? null) : null,
-        quantity: li.quantity,
-        price: li.price,
-      })),
-      cfg.defaultShippingCost,
-      o.country,
-    );
+    const input = o.lineItems.map((li) => ({
+      variantShopifyId: li.variantId ? (shopifyIdOf.get(li.variantId) ?? null) : null,
+      quantity: li.quantity,
+      price: li.price,
+    }));
+    // Cancelled orders never shipped: no product, shipping or handling cost.
+    const result = o.cancelledAt ? uncostedOrder(input) : costOrder(book, input, cfg.defaultShippingCost, o.country);
     o.lineItems.forEach((li, i) => {
       const c = result.lines[i];
       if (Math.abs(li.unitCost - c.unitCost) > 1e-9 || differs(li.shippingCost, c.shippingCost) || li.costSource !== c.source) {
         lineRows.push(Prisma.sql`(${li.id}, ${c.unitCost}::float8, ${c.shippingCost}::float8, ${c.source})`);
       }
     });
-    const handlingCost = o.lineItems.length ? cfg.defaultHandlingCost : 0;
+    const handlingCost = o.lineItems.length && !o.cancelledAt ? cfg.defaultHandlingCost : 0;
     const platformFees = round2(o.total * (cfg.platformFeePercent / 100));
     const transactionFees =
       o.feesEstimated === true ? (o.total === 0 ? 0 : round2(o.total * (cfg.paymentFeePercent / 100) + cfg.paymentFeeFixed)) : o.transactionFees;

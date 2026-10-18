@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { resolveRange, type DateRange } from "./dates";
+import { db } from "./db";
 
 export const PRODUCT_COOKIE = "pd_product";
 export const RANGE_COOKIE = "pd_range";
@@ -26,5 +27,17 @@ export async function getScope(sp: { range?: string; from?: string; to?: string;
       }
     }
   }
-  return { productId, range: resolveRange(rangeParams) };
+  // Days follow the store's timezone (taken from Shopify on every sync).
+  const settings = await db.settings.findUnique({ where: { id: "default" }, select: { timezone: true } });
+  return { productId, range: resolveRange(rangeParams, validTimezone(settings?.timezone)) };
+}
+
+export function validTimezone(tz: string | null | undefined): string {
+  if (!tz) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return tz;
+  } catch {
+    return "UTC";
+  }
 }

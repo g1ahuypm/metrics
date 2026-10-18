@@ -128,3 +128,8 @@ export function costOrder(book: CostBook, lines: OrderCostInput[], defaultShippi
       : 0;
   return { lines: costed, cogs, shippingCost, anyTier };
 }
+
+/** A cancelled order: nothing shipped, so no product or shipping cost. */
+export function uncostedOrder(lines: OrderCostInput[]): OrderCostResult {
+  return { lines: lines.map(() => ({ productCost: 0, shippingCost: 0, unitCost: 0, source: "none" as const })), cogs: 0, shippingCost: 0, anyTier: false };
+}

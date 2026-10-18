@@ -5,11 +5,9 @@ import { Check, ChevronDown, ChevronRight, Copy, Gift, Info, Loader2, Plus, Sear
 import { clearVariantTiersAction, saveTiersAction, type TierInput } from "@/lib/actions/costs";
 import { resolveTier } from "@/lib/costing";
 import { MARKETS, marketLabel } from "@/lib/constants";
-import { fmtMoney, fmtNumber, fmtPercent, safeDiv } from "@/lib/format";
+import { fmtMoney, fmtNumber } from "@/lib/format";
 
 export type TierRow = { quantity: number; productCost: number; shippingCost: number };
-/** Observed average net price per bundle size, from real orders. */
-export type SoldPrices = Record<number, { avg: number; count: number }>;
 /** Tiers keyed by country code; "" is the default used for any other country. */
 export type TiersByCountry = Record<string, TierRow[]>;
 
@@ -32,8 +30,6 @@ export type ProductCostData = {
   tiers: TiersByCountry;
   unitsByCountry: Record<string, number>;
   variants: VariantCostData[];
-  soldPrices: SoldPrices;
-  soldPricesByCountry: Record<string, SoldPrices>;
   isFreeGift: boolean;
 };
 
@@ -79,16 +75,8 @@ export function ProductCostList({ products, currency, editor }: { products: Prod
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
         <div className="text-ink-2">
           <p>
-            <strong className="text-ink">Qty 1</strong> is what one unit costs you, product plus shipping.{" "}
-            <strong className="text-ink">Qty 2</strong> is the total for a two-unit order, and so on. When a customer buys a quantity you
-            haven&apos;t listed, the nearest smaller tier is scaled per unit.
-          </p>
-          <p className="mt-1">
-            Enter costs for each country you ship to. Every order is priced by the country it ships to. An{" "}
-            <span className="font-medium text-warn-text">amber</span> country has sales but no costs yet.
-          </p>
-          <p className="mt-1">
-            Saving updates every past order with this product right away, on every page.
+            What your supplier charges per order, for each country. <strong className="text-ink">Qty 2</strong> is the total for a two-book
+            order, and so on. Saving updates every past order right away.
           </p>
         </div>
       </div>
@@ -165,7 +153,6 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
   const [pending, start] = useTransition();
   const coverage = costCoverage(product);
   const units = product.variants.reduce((s, v) => s + v.unitsSold, 0);
-  const price = product.variants[0]?.price ?? 0;
   const overrides = product.variants.filter((v) => hasAny(v.tiers)).length;
   const shopifyCost = product.variants.find((v) => v.shopifyUnitCost !== null)?.shopifyUnitCost ?? null;
   const quantitiesBought = [...new Set(product.variants.flatMap((v) => v.quantitiesBought))].sort((a, b) => a - b);
@@ -201,12 +188,6 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
                 </span>
               ) : (
                 <span className={`badge ${status.tone}`}>{status.label}</span>
-              )}
-              <span>List {fmtMoney(price, currency)}</span>
-              {product.soldPrices[1] && !product.isFreeGift && (
-                <span title={`Average paid for a single unit across ${product.soldPrices[1].count} orders`}>
-                  Sells at {fmtMoney(product.soldPrices[1].avg, currency)}
-                </span>
               )}
               <span>{product.variants.length} variant{product.variants.length === 1 ? "" : "s"}</span>
               <span>{fmtNumber(units)} units sold</span>
@@ -260,9 +241,6 @@ function ProductCard({ product, currency, editor }: { product: ProductCostData; 
             initial={currentTiers}
             copyFrom={copyFrom}
             offerNoCost={!coverage.anyCountry && coverage.legacyAll.length === 0}
-            price={price}
-            soldPrices={product.soldPrices}
-            countryPrices={product.soldPricesByCountry[country] ?? {}}
             currency={currency}
             editor={editor}
             quantitiesBought={quantitiesBought}
@@ -307,7 +285,6 @@ function VariantSection({
           <span className="font-medium">{variant.title}</span>
           {variant.sku && <span className="ml-2 text-xs text-ink-3">{variant.sku}</span>}
           <span className="ml-2 text-xs text-ink-3">{fmtNumber(variant.unitsSold)} sold</span>
-          <span className="ml-2 text-xs text-ink-3">List {fmtMoney(variant.price, currency)}</span>
         </div>
         {editor && !customizing && (
           <button type="button" className="btn-ghost text-xs" onClick={() => setCustomizing(true)}>
@@ -342,9 +319,6 @@ function VariantSection({
             initial={own}
             copyFrom={productTiers.length ? [{ label: "product costs", tiers: productTiers }] : []}
             offerNoCost={false}
-            price={variant.price}
-            soldPrices={product.soldPrices}
-            countryPrices={product.soldPricesByCountry[country] ?? {}}
             currency={currency}
             editor={editor}
             quantitiesBought={variant.quantitiesBought}
@@ -369,9 +343,6 @@ function TierEditor({
   initial,
   copyFrom,
   offerNoCost,
-  price,
-  soldPrices,
-  countryPrices,
   currency,
   editor,
   quantitiesBought,
@@ -385,10 +356,6 @@ function TierEditor({
   copyFrom: { label: string; tiers: TierRow[] }[];
   /** Offer "No cost (digital or bonus)", which sets $0 for every country. */
   offerNoCost: boolean;
-  price: number;
-  soldPrices: SoldPrices;
-  /** The same, only for orders shipping to this editor's country. */
-  countryPrices: SoldPrices;
   currency: string;
   editor: boolean;
   quantitiesBought: number[];
@@ -412,17 +379,6 @@ function TierEditor({
   const dirty =
     JSON.stringify(parsed) !==
     JSON.stringify(saved.map((t) => ({ quantity: t.quantity, productCost: t.productCost, shippingCost: t.shippingCost })));
-  /**
-   * What customers pay for a bundle of q units: the average of real orders to this
-   * country (what the P&L uses), else of all countries, else list price × q.
-   */
-  const paidFor = (q: number) => {
-    const here = countryPrices[q];
-    if (here?.count) return { value: here.avg, note: `avg of ${here.count} ${marketLabel(country)} order${here.count === 1 ? "" : "s"}`, real: true };
-    const all = soldPrices[q];
-    if (all?.count) return { value: all.avg, note: `avg of ${all.count} order${all.count === 1 ? "" : "s"}, all countries`, real: true };
-    return { value: price * q, note: "list price · no orders yet", real: false };
-  };
   const nextQty = (Math.max(0, ...parsed.map((r) => r.quantity)) || 0) + 1;
   const unlisted = quantitiesBought.filter((q) => !parsed.some((r) => r.quantity === q));
   const isEmpty = saved.length === 0 && rows.every((r) => r.productCost === "" && r.shippingCost === "");
@@ -473,9 +429,6 @@ function TierEditor({
               <th className="py-1 pr-3 font-medium">Shipping</th>
               <th className="py-1 pr-3 text-right font-medium">Total cost</th>
               <th className="py-1 pr-3 text-right font-medium">Per unit</th>
-              <th className="py-1 pr-3 text-right font-medium">Customers paid</th>
-              <th className="py-1 pr-3 text-right font-medium">Profit</th>
-              <th className="py-1 pr-3 text-right font-medium">Margin</th>
               {editor && <th className="py-1"></th>}
             </tr>
           </thead>
@@ -485,9 +438,6 @@ function TierEditor({
               const total = Number(r.productCost || 0) + Number(r.shippingCost || 0);
               // Profit means nothing until a cost is entered.
               const entered = r.productCost !== "" || r.shippingCost !== "";
-              const paid = paidFor(q);
-              const sells = paid.value;
-              const margin = safeDiv(sells - total, sells);
               return (
                 <tr key={i} className="border-t border-border">
                   <td className="py-1.5 pr-3">
@@ -504,12 +454,6 @@ function TierEditor({
                   </td>
                   <td className="py-1.5 pr-3 text-right tnum font-medium">{entered ? fmtMoney(total, currency) : "—"}</td>
                   <td className="py-1.5 pr-3 text-right tnum text-ink-2">{entered && q > 0 ? fmtMoney(total / q, currency) : "—"}</td>
-                  <td className="py-1.5 pr-3 text-right">
-                    <div className={`tnum ${paid.real ? "font-medium" : "text-ink-3"}`}>{fmtMoney(sells, currency)}</div>
-                    <div className="whitespace-nowrap text-[10px] text-ink-3">{paid.note}</div>
-                  </td>
-                  <td className={`py-1.5 pr-3 text-right tnum font-medium ${entered && sells - total < 0 ? "text-bad-text" : ""}`}>{entered ? fmtMoney(sells - total, currency) : "—"}</td>
-                  <td className={`py-1.5 pr-3 text-right tnum ${entered && margin < 0.3 && sells > 0 ? "text-warn-text" : ""}`}>{entered && sells > 0 ? fmtPercent(margin, 0) : "—"}</td>
                   {editor && (
                     <td className="py-1.5 text-right">
                       <button type="button" className="btn-ghost px-1.5 py-1" onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))} aria-label="Remove tier">
@@ -523,10 +467,6 @@ function TierEditor({
           </tbody>
         </table>
       </div>
-      <p className="mt-1.5 text-[11px] text-ink-3">
-        Customers paid is the average of your real orders at each bundle size to this country, after discounts. It is the same number your Profit &amp; Loss uses.
-        To change it, change the price or discount in Shopify.
-      </p>
       {editor && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button type="button" className="btn-ghost text-xs" onClick={() => setRows((rs) => [...rs, { ...blank, quantity: String(nextQty) }])}>

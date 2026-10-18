@@ -14,44 +14,20 @@ export default async function ProductsPage() {
     db.costTier.findMany({ orderBy: { quantity: "asc" } }),
     db.orderLineItem.findMany({
       where: { variantId: { not: null }, order: { cancelledAt: null } },
-      select: { orderId: true, variantId: true, quantity: true, price: true, listPrice: true, order: { select: { country: true } } },
+      select: { orderId: true, variantId: true, quantity: true, price: true, order: { select: { country: true } } },
     }),
   ]);
   const productOfVariant = new Map(variants.map((v) => [v.id, v.productId ?? `variant:${v.shopifyId}`]));
-  // A bundle is how many of a product one order holds, even when they arrive on
-  // separate lines (post-purchase upsells): order+product → { quantity, price }.
-  const bundles = new Map<string, { pid: string; country: string; quantity: number; price: number }>();
+  // Free gifts: products that only ever appear at $0 in orders.
+  const lineStats = new Map<string, { lines: number; zero: number }>();
   for (const s of sold) {
     const pid = s.variantId ? productOfVariant.get(s.variantId) : undefined;
     if (!pid) continue;
-    const key = `${s.orderId}|${pid}`;
-    const b = bundles.get(key) ?? { pid, country: s.order.country ?? "", quantity: 0, price: 0 };
-    b.quantity += s.quantity;
-    b.price += s.price;
-    bundles.set(key, b);
+    const st = lineStats.get(pid) ?? { lines: 0, zero: 0 };
+    st.lines += 1;
+    if (s.price === 0) st.zero += 1;
+    lineStats.set(pid, st);
   }
-  // What each bundle size actually sells for, from real orders: productId → quantity → { total, count, gifts }
-  const soldByQty = new Map<string, Map<number, { total: number; count: number; zero: number }>>();
-  for (const b of bundles.values()) {
-    const m = soldByQty.get(b.pid) ?? new Map();
-    const row = m.get(b.quantity) ?? { total: 0, count: 0, zero: 0 };
-    row.total += b.price;
-    row.count += 1;
-    if (b.price === 0) row.zero += 1;
-    m.set(b.quantity, row);
-    soldByQty.set(b.pid, m);
-  }
-  // The same per shipping country: productId → country → quantity → { total, count }
-  const soldByCountry = new Map<string, Record<string, Record<number, { avg: number; count: number }>>>();
-  for (const b of bundles.values()) {
-    const byCountry = soldByCountry.get(b.pid) ?? {};
-    const row = ((byCountry[b.country] ??= {})[b.quantity] ??= { avg: 0, count: 0 });
-    row.avg += b.price; // running total; turned into an average below
-    row.count += 1;
-    soldByCountry.set(b.pid, byCountry);
-  }
-  for (const byCountry of soldByCountry.values())
-    for (const rows of Object.values(byCountry)) for (const row of Object.values(rows)) row.avg = Math.round((row.avg / row.count) * 100) / 100;
 
   // Units sold per variant, which bundle quantities customers buy, and where orders ship.
   const soldByVariant = new Map<string, { units: number; quantities: Set<number>; countries: Record<string, number> }>();
@@ -72,15 +48,7 @@ export default async function ProductsPage() {
     const productId = v.productId ?? `variant:${v.shopifyId}`;
     let p = products.get(productId);
     if (!p) {
-      const m = soldByQty.get(productId) ?? new Map<number, { total: number; count: number; zero: number }>();
-      const soldPrices: Record<number, { avg: number; count: number }> = {};
-      let lines = 0;
-      let zero = 0;
-      for (const [q, r] of m) {
-        soldPrices[q] = { avg: r.count ? Math.round((r.total / r.count) * 100) / 100 : 0, count: r.count };
-        lines += r.count;
-        zero += r.zero;
-      }
+      const st = lineStats.get(productId) ?? { lines: 0, zero: 0 };
       p = {
         productId,
         title: v.productTitle,
@@ -88,9 +56,7 @@ export default async function ProductsPage() {
         tiers: {},
         unitsByCountry: {},
         variants: [],
-        soldPrices,
-        soldPricesByCountry: soldByCountry.get(productId) ?? {},
-        isFreeGift: lines >= 3 && zero === lines,
+        isFreeGift: st.lines >= 3 && st.zero === st.lines,
       };
       products.set(productId, p);
     }

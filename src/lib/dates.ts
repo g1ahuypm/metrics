@@ -7,12 +7,15 @@ import {
   subMonths,
 } from "date-fns";
 
-// All bucketing is done on UTC calendar days so Shopify orders and Meta daily
-// insights line up regardless of the server's local timezone.
+// A day means a calendar day in the STORE's timezone, like Shopify's own reports.
+// Calendar dates are carried as UTC-midnight Date objects (2026-10-17T00:00Z means
+// "October 17"); order timestamps are mapped onto them with storeDate(), and a
+// calendar day is turned back into real instants with dayStart().
 
 export type DateRange = {
-  from: Date; // inclusive, UTC midnight
-  to: Date; // inclusive, UTC midnight
+  from: Date; // inclusive calendar date (UTC midnight)
+  to: Date; // inclusive calendar date (UTC midnight)
+  tz: string; // store timezone, e.g. America/New_York
   preset: string;
   label: string;
   prevFrom: Date;
@@ -39,6 +42,46 @@ export function todayUtc(): Date {
   return utcDay(new Date());
 }
 
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** The calendar date ("YYYY-MM-DD") an instant falls on in the given timezone. */
+export function storeDate(instant: Date, tz: string): string {
+  let f = dateFormatters.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
+    dateFormatters.set(tz, f);
+  }
+  return f.format(instant);
+}
+
+/** Today's calendar date in the given timezone. */
+export function todayIn(tz: string): Date {
+  return new Date(`${storeDate(new Date(), tz)}T00:00:00.000Z`);
+}
+
+/** Minutes the timezone is ahead of UTC at that instant (New York in October: -240). */
+function offsetMinutes(instant: Date, tz: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(instant);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return Math.round((asUtc - Math.floor(instant.getTime() / 1000) * 1000) / 60000);
+}
+
+/** The instant a calendar date (UTC-midnight Date) begins in the given timezone. */
+export function dayStart(date: Date, tz: string): Date {
+  const guess = utcDay(date).getTime();
+  let t = guess - offsetMinutes(new Date(guess), tz) * 60000;
+  t = guess - offsetMinutes(new Date(t), tz) * 60000; // settle across a DST change
+  return new Date(t);
+}
+
+/** The instant just after a calendar date ends in the given timezone (exclusive bound). */
+export function dayEnd(date: Date, tz: string): Date {
+  return dayStart(addDays(utcDay(date), 1), tz);
+}
+
 export function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
@@ -54,8 +97,8 @@ export function endOfUtcDay(d: Date): Date {
   return new Date(utcDay(d).getTime() + 24 * 60 * 60 * 1000 - 1);
 }
 
-export function resolveRange(params: { range?: string; from?: string; to?: string }): DateRange {
-  const today = todayUtc();
+export function resolveRange(params: { range?: string; from?: string; to?: string }, tz = "UTC"): DateRange {
+  const today = todayIn(tz);
   let from: Date;
   let to: Date;
   let preset = params.range ?? "30d";
@@ -114,7 +157,7 @@ export function resolveRange(params: { range?: string; from?: string; to?: strin
   const prevTo = subDays(from, 1);
   const prevFrom = subDays(prevTo, days - 1);
 
-  return { from, to, preset, label, prevFrom, prevTo, days };
+  return { from, to, tz, preset, label, prevFrom, prevTo, days };
 }
 
 export function eachDay(from: Date, to: Date): string[] {
