@@ -6,8 +6,9 @@ owner's expectations as of the last session.
 ## WHERE WE LEFT OFF (latest session, Oct 19, 2026) — read this first
 
 Oct 19: **Team Tasks + personal Inbox + phone/browser notifications** built on branch
-`claude/eager-cray-sncji0` and tested locally (see "Team tasks" below). NOT deployed yet:
-waiting for the owner's go-ahead after he reviews screenshots. AI key (item 1 below): the owner
+`claude/eager-cray-sncji0`, tested locally, owner approved ("looks good"), DEPLOYED Oct 19
+(live `/api/cron/tasks` answered ok from the GitHub check). Next: owner turns on notifications on
+his phone (Inbox → Turn on → Send a test) to confirm real delivery; invite/assign the team. AI key (item 1 below): the owner
 got step-by-step instructions; not confirmed yet.
 
 Oct 18 state:
