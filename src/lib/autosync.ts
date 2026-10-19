@@ -59,3 +59,26 @@ export async function maybeCheckSupport(): Promise<void> {
     }
   });
 }
+
+const REMIND_STALE_MS = 2 * 60 * 1000;
+
+/**
+ * Task reminders also run when anyone opens the app, in case the scheduler is late.
+ * Claiming the run with a conditional update keeps two page loads from both starting it.
+ */
+export async function maybeRemindTasks(): Promise<void> {
+  const now = new Date();
+  const claimed = await db.settings.updateMany({
+    where: { id: "default", OR: [{ lastTaskReminderAt: null }, { lastTaskReminderAt: { lt: new Date(now.getTime() - REMIND_STALE_MS) } }] },
+    data: { lastTaskReminderAt: now },
+  });
+  if (claimed.count === 0) return;
+  after(async () => {
+    try {
+      const { runTaskReminders } = await import("./tasks/remind");
+      await runTaskReminders();
+    } catch (err) {
+      console.error("task reminders failed", err);
+    }
+  });
+}

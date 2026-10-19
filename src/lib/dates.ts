@@ -77,6 +77,22 @@ export function dayStart(date: Date, tz: string): Date {
   return new Date(t);
 }
 
+/** The instant a wall-clock time ("2026-10-22", "17:00") happens in the given timezone. */
+export function zonedInstant(date: string, time: string, tz: string): Date {
+  const [y, m, d] = date.split("-").map(Number);
+  const [hh, mm] = time.split(":").map(Number);
+  const guess = Date.UTC(y, m - 1, d, hh, mm);
+  let t = guess - offsetMinutes(new Date(guess), tz) * 60000;
+  t = guess - offsetMinutes(new Date(t), tz) * 60000; // settle across a DST change
+  return new Date(t);
+}
+
+/** The hour (0–23) it is right now in the given timezone. */
+export function hourIn(instant: Date, tz: string): number {
+  const h = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit" }).format(instant);
+  return Number(h) % 24;
+}
+
 /** The instant just after a calendar date ends in the given timezone (exclusive bound). */
 export function dayEnd(date: Date, tz: string): Date {
   return dayStart(addDays(utcDay(date), 1), tz);

@@ -1,4 +1,5 @@
-# Checks the support inbox every 5 minutes so customers get answers quickly.
+# Checks the support inbox every 5 minutes so customers get answers quickly,
+# and sends team task reminders (due tomorrow, due today, overdue).
 # Vercel's free plan allows only one daily cron, so GitHub runs this instead.
 # Needs one repository secret: CRON_SECRET (the same value as in Vercel).
 name: Check support inbox
@@ -15,7 +16,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
       - name: Check the inbox and answer new emails
         env:
@@ -28,3 +29,13 @@ jobs:
           fi
           SECRET="$(printf '%s' "$CRON_SECRET" | tr -d '[:space:]')"
           curl --fail-with-body -sS --max-time 90 -H "Authorization: Bearer $SECRET" "$APP_URL/api/cron/support"
+
+      - name: Send task reminders
+        if: always()
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://metrics-azure.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then exit 0; fi
+          SECRET="$(printf '%s' "$CRON_SECRET" | tr -d '[:space:]')"
+          curl --fail-with-body -sS --max-time 90 -H "Authorization: Bearer $SECRET" "$APP_URL/api/cron/tasks"

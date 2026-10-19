@@ -23,8 +23,15 @@ model User {
   role         String    @default("PARTNER")
   createdAt    DateTime  @default(now())
   lastLoginAt  DateTime?
+  timeZone     String? // the browser's time zone (e.g. Asia/Ho_Chi_Minh), picked up while they use the app
   sessions     Session[]
   invites      Invite[]  @relation("InviteCreator")
+
+  tasksAssigned     Task[]             @relation("TaskAssignee")
+  tasksCreated      Task[]             @relation("TaskCreator")
+  taskUpdates       TaskUpdate[]
+  notifications     Notification[]
+  pushSubscriptions PushSubscription[]
 }
 
 model Session {
@@ -79,6 +86,11 @@ model Settings {
   supportLastUid     Int? // highest INBOX UID already imported
   lastSupportSyncAt  DateTime?
   supportLockUntil   DateTime? // one mail run at a time, so no email is answered twice
+
+  // Phone/browser notifications (Web Push). Keys are created on first use; the private one is encrypted.
+  vapidPublicKey     String?
+  vapidPrivateKey    String?
+  lastTaskReminderAt DateTime?
 
   // Meta Ads (token stored encrypted with APP_SECRET)
   metaAdAccountId String?
@@ -315,8 +327,8 @@ model SupportMessage {
   sentAt      DateTime
   sentBy      String? // "AI" or the team member's name, for "out"
   processedAt DateTime? // when the AI handled this inbound message
-  history     Boolean   @default(false) // arrived before Support was connected: never auto-answered
-  aiAttempts  Int       @default(0) // failed AI tries (rate limit, outage); after 3 a person takes over
+  history     Boolean       @default(false) // arrived before Support was connected: never auto-answered
+  aiAttempts  Int           @default(0) // failed AI tries (rate limit, outage); after 3 a person takes over
   createdAt   DateTime      @default(now())
 
   @@index([threadId, sentAt])
@@ -332,4 +344,88 @@ model KbArticle {
   flagForTeam Boolean  @default(false) // someone must also act (refund, address change)
   sortOrder   Int      @default(0)
   updatedAt   DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Team tasks, the personal inbox and phone/browser notifications
+
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  details     String
+  doneMeans   String // what "finished" looks like, so nobody can save a vague task
+  priority    String   @default("normal") // normal | high | urgent
+  status      String   @default("open") // open | done
+  // Due date and optional time as the assignee reads them, in their own time zone.
+  dueDate     String // "2026-10-22"
+  dueTime     String? // "17:00"; null = by the end of that day
+  dueTimeZone String
+  dueAt       DateTime // the moment it becomes overdue
+  link        String?
+
+  assigneeId  String
+  assignee    User    @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  createdById String?
+  createdBy   User?   @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // A pending "I need more time" request from the assignee.
+  extensionDate   String?
+  extensionTime   String?
+  extensionReason String?
+
+  doneAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  updates       TaskUpdate[]
+  notifications Notification[]
+
+  @@index([assigneeId, status, dueAt])
+  @@index([status, dueAt])
+}
+
+model TaskUpdate {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // created | comment | edited | reassigned | due_changed | extension_requested | extension_approved
+  // | extension_declined | done | reopened | reminder
+  kind      String
+  text      String?
+  createdAt DateTime @default(now())
+
+  @@index([taskId, createdAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskId    String?
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  kind      String
+  title     String
+  body      String?
+  href      String
+  key       String?   @unique // reminders: one per task, kind and day, even if two checks overlap
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+model PushSubscription {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
+  device     String? // "iPhone", "Chrome on Windows"
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  @@index([userId])
 }

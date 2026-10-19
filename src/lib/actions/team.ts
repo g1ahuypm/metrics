@@ -58,6 +58,8 @@ export async function removeMemberAction(userId: string): Promise<FormState> {
   if (target.role === "OWNER") return { error: "The owner cannot be removed" };
   if (target.id === me.id) return { error: "You cannot remove yourself" };
   if (target.role === "ADMIN" && me.role !== "OWNER") return { error: "Only the owner can remove admins" };
+  const openTasks = await db.task.count({ where: { assigneeId: userId, status: "open" } });
+  if (openTasks > 0) return { error: `${target.name} still has ${openTasks} open task${openTasks === 1 ? "" : "s"}. Give ${openTasks === 1 ? "it" : "them"} to someone else first (Tasks → Edit).` };
   await db.user.delete({ where: { id: userId } });
   revalidatePath("/team");
   return { success: "Member removed" };

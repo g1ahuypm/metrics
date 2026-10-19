@@ -3,7 +3,14 @@
 Read this whole file before touching code. It is the state of the project and the
 owner's expectations as of the last session.
 
-## WHERE WE LEFT OFF (latest session, Oct 18, 2026) — read this first
+## WHERE WE LEFT OFF (latest session, Oct 19, 2026) — read this first
+
+Oct 19: **Team Tasks + personal Inbox + phone/browser notifications** built on branch
+`claude/eager-cray-sncji0` and tested locally (see "Team tasks" below). NOT deployed yet:
+waiting for the owner's go-ahead after he reviews screenshots. AI key (item 1 below): the owner
+got step-by-step instructions; not confirmed yet.
+
+Oct 18 state:
 
 Done and live (each verified in a browser against real store data before deploy):
 - Costs re-price orders the moment they are saved; costs are per country (US/CA/AU/UK/NZ),
@@ -28,7 +35,7 @@ Still open, in order:
 5. Optional ideas offered: break-even ROAS line on product page, negative-day alerts.
 6. Advise rotating secrets pasted in earlier chats (Shopify client secrets, Neon password).
 
-Working conventions: develop on branch `claude/determined-dirac-uw8e9m`; deploy by fast-
+Working conventions: develop on the session's own branch (Oct 19: `claude/eager-cray-sncji0`); deploy by fast-
 forwarding `claude/ecommerce-metrics-dashboard-ujpiqd` (owner approved deploying tested work).
 Local testing used Postgres 16, real orders pulled read-only via the Shopify connector, a
 local Dovecot IMAP + SMTP capture server for Support, and Playwright at 1360px and 390px.
@@ -131,6 +138,34 @@ local Dovecot IMAP + SMTP capture server for Support, and Playwright at 1360px a
   is sorted and drafted but never auto-sent, since it may already be answered in Gmail.
 - Needs `ANTHROPIC_API_KEY` in Vercel. Tested locally against Dovecot (IMAP), an SMTP
   capture server and a stand-in for the Messages API; real-model replies not yet seen.
+
+## Team tasks, Inbox and notifications (Oct 19, 2026)
+
+Owner's spec: specific tasks (title, details, "Done means", one assignee, due date + optional
+time, priority Normal/High/Urgent, optional link) with automatic reminders. Only OWNER/ADMIN create,
+edit, reassign, delete, reopen and answer "more time" requests (`canManageTasks`); everyone else
+(Partner, Support) sees their own tasks, posts updates, marks done, asks for more time.
+Owner chose: a personal **Inbox** (bell, top of sidebar / mobile bar) **plus phone/browser
+notifications (Web Push)**, no email. Support emails → tasks: "not yet".
+
+- Schema: `Task`, `TaskUpdate` (timeline), `Notification` (inbox; `key` unique = reminder dedupe),
+  `PushSubscription` (one per device), `User.timeZone` (from the browser, `DeviceSetup`),
+  `Settings.vapidPublicKey/vapidPrivateKey` (auto-generated on first use, private encrypted).
+- Due dates are calendar dates in the ASSIGNEE's time zone (`Task.dueTimeZone`, `dueAt` = the
+  instant it becomes overdue; no time = end of that day). `src/lib/tasks/due.ts`.
+- Reminders `src/lib/tasks/remind.ts`: due tomorrow, due today, overdue every day, and a copy to the
+  creator from day 2 late; only between 9:00 and 21:00 in the person's zone; none for a task
+  created that same day; one push per person per run (digest). Runs from the GitHub Actions
+  workflow (second step, `/api/cron/tasks`, same CRON_SECRET) and on any page load if >2 min old.
+- Push: `src/lib/push.ts` (web-push), `public/sw.js`, `src/lib/push-client.ts`,
+  Inbox → "Turn on notifications" / "Send a test". iPhone needs Add to Home Screen first
+  (iOS 16.4+); the card shows the steps. Manifest `src/app/manifest.ts`, icons in `public/`.
+- Tested locally: full owner↔member flow in Playwright (create, inbox, update, more time,
+  approve, done), reminder engine at fixed clock times incl. quiet hours and no duplicates,
+  encrypted delivery to a local stand-in push service (decrypted OK; 410 device removed),
+  service worker shows the notification (CDP push), permissions, 390px layouts.
+  Not testable in the sandbox: a real Apple/Google push service (Chromium here has none), so
+  the owner must do "Send a test" on his phone once live.
 
 ## Costing rules (src/lib/costing.ts, costbook.ts)
 

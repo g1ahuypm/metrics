@@ -8,9 +8,9 @@ import { db } from "./db";
 export const SESSION_COOKIE = "pd_session";
 const SESSION_DAYS = 30;
 
-import { canEdit, canSupport, ROLE_LABELS, type Role, type SessionUser } from "./auth-shared";
+import { canEdit, canManageTasks, canSupport, ROLE_LABELS, type Role, type SessionUser } from "./auth-shared";
 
-export { canEdit, canSupport, ROLE_LABELS };
+export { canEdit, canManageTasks, canSupport, ROLE_LABELS };
 export type { Role, SessionUser };
 export const ROLES: Role[] = ["OWNER", "ADMIN", "PARTNER", "SUPPORT"];
 
@@ -56,7 +56,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   });
   if (!session || session.expiresAt < new Date()) return null;
   const { user } = session;
-  return { id: user.id, email: user.email, name: user.name, role: user.role as Role };
+  return { id: user.id, email: user.email, name: user.name, role: user.role as Role, timeZone: user.timeZone };
 }
 
 /** Signed in, any role. Support staff only ever see the Support pages. */

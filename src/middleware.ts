@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const SESSION_COOKIE = "pd_session";
 // API routes enforce their own auth (session or CRON_SECRET) and return JSON instead of redirecting.
-const PUBLIC_PREFIXES = ["/login", "/register", "/invite", "/api/", "/_next", "/favicon.ico"];
+// The notification worker, app manifest and icons must load without a session (phones fetch them on their own).
+const PUBLIC_PREFIXES = ["/login", "/register", "/invite", "/api/", "/_next", "/favicon.ico", "/sw.js", "/manifest.webmanifest", "/icons/", "/apple-touch-icon.png", "/icon.svg"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

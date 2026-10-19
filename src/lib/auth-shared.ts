@@ -5,6 +5,7 @@ export type SessionUser = {
   email: string;
   name: string;
   role: Role;
+  timeZone: string | null;
 };
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -22,3 +23,6 @@ export function canEdit(role: string): boolean {
 export function canSupport(role: string): boolean {
   return role === "OWNER" || role === "ADMIN" || role === "SUPPORT";
 }
+
+/** Who creates, assigns and edits team tasks. Everyone else works on the tasks given to them. */
+export const canManageTasks = canEdit;
