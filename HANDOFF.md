@@ -5,8 +5,10 @@ owner's expectations as of the last session.
 
 ## WHERE WE LEFT OFF (latest session, Oct 19, 2026) — read this first
 
-Oct 20 (later): **Multi-store** built on `claude/eager-cray-sncji0`, tested, NOT deployed yet (waiting
-for the owner's go-ahead). Owner's answers: each store has its own Shopify and its own support inbox;
+Oct 20 (later): **Multi-store** built on `claude/eager-cray-sncji0`, tested, owner approved, DEPLOYED
+(live cron reports `{"stores":{"LearnWell":…}}` and logs into Gmail, so the one-time move worked).
+Owner confirmed: ANTHROPIC_API_KEY added in Vercel; phone notifications work. Still to do: a real test
+email to see the AI's first live reply; then the owner adds his next stores (guide him per store). Owner's answers: each store has its own Shopify and its own support inbox;
 ad accounts are sometimes shared, sometimes not; members see only the stores the owner picks; all USD;
 expenses per store or "Shared" (split by each store's revenue that day); the app opens on the last store
 viewed (cookie `pd_store`), "All stores" the first time. Design:
