@@ -53,7 +53,7 @@ export function ReplyPanel({
   return (
     <div className="card p-4">
       {actionNote && (
-        <div className="mb-3 flex flex-col gap-2 rounded-lg bg-accent-soft px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-3 flex flex-col gap-2 rounded-xl bg-accent-soft px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
           <span>
             <strong className="font-medium">To do:</strong> {actionNote}
           </span>

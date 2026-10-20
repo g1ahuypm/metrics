@@ -81,7 +81,7 @@ export function TaskForm({ members, values, today, myTimeZone }: { members: Memb
             {PRIORITIES.map((p) => (
               <label key={p.key} className="cursor-pointer">
                 <input type="radio" name="priority" value={p.key} defaultChecked={values.priority === p.key} className="peer sr-only" />
-                <span className={`block rounded-lg border border-border px-2 py-2 text-center text-sm text-ink-2 peer-focus-visible:ring-2 peer-focus-visible:ring-accent/40 ${PRIORITY_STYLE[p.key]}`}>
+                <span className={`block rounded-xl border border-border px-2 py-2 text-center text-sm text-ink-2 peer-focus-visible:ring-2 peer-focus-visible:ring-accent/40 ${PRIORITY_STYLE[p.key]}`}>
                   {p.label}
                 </span>
               </label>
@@ -154,7 +154,7 @@ export function DoneForm({ taskId, doneMeans }: { taskId: string; doneMeans: str
       </button>
     );
   return (
-    <form action={action} className="space-y-2 rounded-lg border border-border p-3">
+    <form action={action} className="space-y-2 rounded-xl border border-border p-3">
       <p className="text-xs text-ink-2">
         <span className="font-medium text-ink">Check first:</span> {doneMeans}
       </p>
@@ -181,7 +181,7 @@ export function MoreTimeForm({ taskId, minDate }: { taskId: string; minDate: str
       </button>
     );
   return (
-    <form action={action} className="space-y-2 rounded-lg border border-border p-3">
+    <form action={action} className="space-y-2 rounded-xl border border-border p-3">
       <div className="grid grid-cols-[1fr_auto] gap-2">
         <div>
           <label className="label" htmlFor="mt-date">New date</label>

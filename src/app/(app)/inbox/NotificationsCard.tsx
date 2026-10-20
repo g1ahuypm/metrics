@@ -116,7 +116,7 @@ export function NotificationsCard({ publicKey, devices }: { publicKey: string; d
                   In Safari, tap the Share button <Share className="inline h-3.5 w-3.5 align-[-2px]" /> at the bottom.
                 </li>
                 <li>Scroll down, tap <strong className="font-medium">Add to Home Screen</strong>, then <strong className="font-medium">Add</strong>.</li>
-                <li>Open <strong className="font-medium">ProfitDeck</strong> from your home screen and sign in.</li>
+                <li>Open <strong className="font-medium">Margin</strong> from your home screen and sign in.</li>
                 <li>Open Inbox (the bell) and tap <strong className="font-medium">Turn on notifications</strong>, then Allow.</li>
               </ol>
               <p className="mt-2 text-xs text-ink-3">Needs iOS 16.4 or newer (Settings → General → About → iOS Version).</p>

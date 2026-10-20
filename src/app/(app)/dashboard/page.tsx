@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Download } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { scopeQuery } from "@/lib/dates";
-import { getScope } from "@/lib/scope";
+import { hourIn, scopeQuery } from "@/lib/dates";
+import { getScope, validTimezone } from "@/lib/scope";
 import { getDataStatus, getMetrics } from "@/lib/metrics";
 import { PageHeader } from "@/components/PageHeader";
 import { DateRangePicker } from "@/components/DateRangePicker";
@@ -19,10 +19,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const [report, status] = await Promise.all([getMetrics(range), getDataStatus()]);
   const currency = status.settings?.currency ?? "USD";
   const hasData = status.orderCount > 0 || status.insightCount > 0;
+  const hour = hourIn(new Date(), validTimezone(user.timeZone ?? status.settings?.timezone));
+  const greeting = `Good ${hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}, ${user.name.trim().split(/\s+/)[0]}`;
 
   return (
     <div>
-      <PageHeader title="Dashboard" description={`Whole store · ${range.label}`}>
+      <PageHeader title={greeting} description={`Here's how ${status.settings?.storeName ?? "your store"} did · ${range.label}`}>
         <DateRangePicker range={range} />
         <Link href={`/api/export/daily?${scopeQuery(range)}`} className="btn-ghost" prefetch={false} title="Download day-by-day numbers as CSV">
           <Download className="h-4 w-4" />

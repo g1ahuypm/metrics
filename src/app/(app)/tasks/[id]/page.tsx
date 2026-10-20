@@ -87,7 +87,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
             )}
             <PriorityBadge priority={task.priority} always />
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">{task.title}</h1>
+          <h1 className="text-[28px] font-extrabold tracking-tight">{task.title}</h1>
         </div>
         {manager && (
           <Link href={`/tasks/${id}/edit`} className="btn-secondary shrink-0 self-start">

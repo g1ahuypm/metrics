@@ -10,7 +10,7 @@ import { SubmitButton } from "@/components/SubmitButton";
 export function CustomCostForm({ today }: { today: string }) {
   const [state, action] = useActionState(addCustomCostAction, undefined);
   return (
-    <form action={action} className="rounded-lg border border-border bg-surface-2 p-3">
+    <form action={action} className="rounded-xl border border-border bg-surface-2 p-3">
       <FormMessage state={state} />
       <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
         <div className="lg:col-span-2">

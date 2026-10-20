@@ -5,6 +5,16 @@ owner's expectations as of the last session.
 
 ## WHERE WE LEFT OFF (latest session, Oct 19, 2026) — read this first
 
+Oct 20: **Rebrand to "Margin" + look C** (lavender ground, white rounded cards, violet #6D4AFF +
+teal profit, Plus Jakarta Sans, floating sidebar, phone bottom tab bar, filled Net profit card,
+greeting on Dashboard), chosen by the owner from design drafts
+(https://claude.ai/artifact/UEUFkWzUgH29KurxSfzroW). Built on `claude/eager-cray-sncji0`, tested
+locally (desktop, phone, dark mode, every page); waiting for go-ahead to deploy. Next after that:
+**multi-store** (store switcher, "All stores" view). Waiting on owner: does each store have its own
+Shopify + Meta account, own support inbox, which team members see which stores, currencies.
+Known, pre-existing: an intermittent React hydration error #418 on /orders (also on the live
+version; React recovers). Not yet investigated.
+
 Oct 19: **Team Tasks + personal Inbox + phone/browser notifications** built on branch
 `claude/eager-cray-sncji0`, tested locally, owner approved ("looks good"), DEPLOYED Oct 19
 (live `/api/cron/tasks` answered ok from the GitHub check). Next: owner turns on notifications on

@@ -114,7 +114,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
             <Link
               key={t.key}
               href={tabHref(t.key)}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${t.key === tab.key ? "bg-accent-soft text-accent" : "text-ink-2 hover:bg-surface-2"}`}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold ${t.key === tab.key ? "bg-ink text-surface" : "text-ink-2 hover:bg-surface-2"}`}
             >
               {t.label}
               {counts[i] !== null && <span className="rounded-full bg-surface-2 px-1.5 text-[11px] text-ink-3">{counts[i]}</span>}

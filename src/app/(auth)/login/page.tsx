@@ -9,7 +9,7 @@ export default async function LoginPage() {
   const usersExist = await hasAnyUsers();
   return (
     <div>
-      <h1 className="text-xl font-semibold">Sign in</h1>
+      <h1 className="text-2xl font-extrabold tracking-tight">Sign in</h1>
       <p className="mt-1 text-sm text-ink-2">Welcome back. Enter your details to continue.</p>
       <div className="mt-6">
         <LoginForm />

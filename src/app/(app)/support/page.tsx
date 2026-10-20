@@ -71,7 +71,7 @@ export default async function SupportInboxPage({ searchParams }: { searchParams:
             <Link
               key={t.key}
               href={`/support?tab=${t.key}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${t.key === tab.key ? "bg-accent-soft text-accent" : "text-ink-2 hover:bg-surface-2"}`}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold ${t.key === tab.key ? "bg-ink text-surface" : "text-ink-2 hover:bg-surface-2"}`}
             >
               {t.label}
               <span className={`rounded-full px-1.5 text-[11px] ${t.key === "needs" && counts[i] > 0 ? "bg-warn/20 text-warn-text" : "bg-surface-2 text-ink-3"}`}>{counts[i]}</span>

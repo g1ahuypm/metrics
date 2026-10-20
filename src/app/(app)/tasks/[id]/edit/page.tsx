@@ -26,7 +26,7 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
         <ArrowLeft className="h-4 w-4" /> Back to the task
       </Link>
       <div className="mb-5 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Edit task</h1>
+        <h1 className="text-[28px] font-extrabold tracking-tight">Edit task</h1>
         <DeleteTaskButton taskId={id} />
       </div>
       <div className="card p-4 sm:p-6">

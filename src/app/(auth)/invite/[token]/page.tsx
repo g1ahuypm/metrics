@@ -11,7 +11,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) {
     return (
       <div>
-        <h1 className="text-xl font-semibold">Invite not valid</h1>
+        <h1 className="text-2xl font-extrabold tracking-tight">Invite not valid</h1>
         <p className="mt-2 text-sm text-ink-2">
           This invite link has expired or was already used. Ask the person who invited you for a new one.
         </p>
@@ -22,7 +22,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
 
   return (
     <div>
-      <h1 className="text-xl font-semibold">Join {settings?.storeName ?? "the team"}</h1>
+      <h1 className="text-2xl font-extrabold tracking-tight">Join {settings?.storeName ?? "the team"}</h1>
       <p className="mt-1 text-sm text-ink-2">
         {invite.createdBy.name} invited you as <strong>{ROLE_LABELS[invite.role as Role]}</strong>. Create your
         account to get access to the dashboard.

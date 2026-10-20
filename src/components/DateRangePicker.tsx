@@ -43,14 +43,14 @@ export function DateRangePicker({ range }: { range: DateRange }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="hidden md:flex items-center rounded-lg border border-border bg-surface p-0.5">
+      <div className="hidden md:flex items-center rounded-full border border-border bg-surface p-1">
         {PRESETS.map((p) => (
           <button
             key={p.key}
             type="button"
             onClick={() => pick(p.key)}
-            className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              range.preset === p.key ? "bg-accent-soft text-accent" : "text-ink-2 hover:text-ink"
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+              range.preset === p.key ? "bg-ink text-surface" : "text-ink-2 hover:text-ink"
             }`}
           >
             {p.label}
@@ -59,8 +59,8 @@ export function DateRangePicker({ range }: { range: DateRange }) {
         <button
           type="button"
           onClick={() => setShowCustom((v) => !v)}
-          className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
-            range.preset === "custom" ? "bg-accent-soft text-accent" : "text-ink-2 hover:text-ink"
+          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+            range.preset === "custom" ? "bg-ink text-surface" : "text-ink-2 hover:text-ink"
           }`}
         >
           Custom

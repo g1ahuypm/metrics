@@ -53,7 +53,7 @@ export function IntegrationCard({
       </div>
 
       {connected && !editing && (
-        <div className="mt-4 rounded-lg bg-surface-2 p-3 text-xs">
+        <div className="mt-4 rounded-xl bg-surface-2 p-3 text-xs">
           <div className="flex justify-between gap-2"><span className="text-ink-3">Account</span><span className="font-medium">{identity}</span></div>
           <div className="mt-1 flex justify-between gap-2"><span className="text-ink-3">Token</span><span className="font-mono">{tokenHint}</span></div>
           <div className="mt-1 flex justify-between gap-2"><span className="text-ink-3">Last sync</span><span>{lastSync}</span></div>

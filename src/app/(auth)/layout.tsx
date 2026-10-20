@@ -7,8 +7,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <Link href="/" className="mb-8">
         <Logo />
       </Link>
-      <div className="card w-full max-w-md p-6 sm:p-8">{children}</div>
-      <p className="mt-6 text-xs text-ink-3">Self-hosted profit analytics for your store.</p>
+      <div className="card w-full max-w-md p-6 sm:p-9">{children}</div>
+      <p className="mt-6 text-xs text-ink-3">Profit, orders, ads, support and tasks for every store.</p>
     </div>
   );
 }

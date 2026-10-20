@@ -56,7 +56,7 @@ function CountryTabs({
 }) {
   const tabs = MARKETS.map((m) => ({ code: m.code, short: m.short }));
   return (
-    <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
+    <div className="flex flex-wrap items-center gap-1 rounded-full border border-border bg-surface p-1">
       {tabs.map((t) => {
         const set = (tiers[t.code]?.length ?? 0) > 0;
         const sold = units[t.code] ?? 0;
@@ -66,8 +66,8 @@ function CountryTabs({
             key={t.code}
             type="button"
             onClick={() => onChange(t.code)}
-            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              active ? "bg-accent-soft text-accent" : "text-ink-2 hover:text-ink"
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+              active ? "bg-ink text-surface" : "text-ink-2 hover:text-ink"
             }`}
             title={`${countryName(t.code)} · ${sold} units sold · ${set ? "costs set" : missing.includes(t.code) ? "no costs yet" : "no costs of its own"}`}
           >
@@ -152,7 +152,7 @@ export function ProductCostEditor({ product, currency, editor }: { product: Prod
       ) : (
         <div className="border-t border-border px-4 py-3">
           {coverage.legacyAll.length > 0 && (
-            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn-text">
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl bg-warn/10 px-3 py-2 text-xs text-warn-text">
               <span>
                 Older costs for all countries ({coverage.legacyAll.map((t) => `qty ${t.quantity}: ${fmtMoney(t.productCost + t.shippingCost, currency)}`).join(", ")}) still
                 apply wherever a country below is empty.
@@ -344,7 +344,7 @@ function TierEditor({
         )}
       </div>
       {isEmpty && editor && copyFrom.length > 0 && (
-        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-surface-2 px-3 py-2 text-xs text-ink-2">
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-xl bg-surface-2 px-3 py-2 text-xs text-ink-2">
           <span>Nothing entered here yet. Copy from</span>
           {copyFrom.map((c) => (
             <button key={c.label} type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setRows(toRows(c.tiers))}>

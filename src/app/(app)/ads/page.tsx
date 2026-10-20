@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Megaphone, ShoppingBag, Target, TrendingUp } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { getScope } from "@/lib/scope";
 import { productHref } from "@/lib/links";
@@ -54,10 +55,10 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <KpiCard label="Ad spend" value={fmtMoney(t.adSpend, currency)} raw={t.adSpend} previous={p.adSpend} upIsGood={false} />
-            <KpiCard label="True ROAS" value={fmtMultiple(t.mer)} raw={t.mer} previous={p.mer} sub="Shopify revenue ÷ spend" />
-            <KpiCard label="Meta ROAS" value={fmtMultiple(t.roas)} raw={t.roas} previous={p.roas} sub={`${fmtNumber(t.adPurchases)} Meta purchases`} />
-            <KpiCard label="Cost per order" value={fmtMoney(t.blendedCpa, currency)} raw={t.blendedCpa} previous={p.blendedCpa} upIsGood={false} sub={`${fmtNumber(t.orders)} Shopify orders`} />
+            <KpiCard icon={Megaphone} tint="orange" label="Ad spend" value={fmtMoney(t.adSpend, currency)} raw={t.adSpend} previous={p.adSpend} upIsGood={false} />
+            <KpiCard icon={TrendingUp} label="True ROAS" value={fmtMultiple(t.mer)} raw={t.mer} previous={p.mer} sub="Shopify revenue ÷ spend" />
+            <KpiCard icon={Target} label="Meta ROAS" value={fmtMultiple(t.roas)} raw={t.roas} previous={p.roas} sub={`${fmtNumber(t.adPurchases)} Meta purchases`} />
+            <KpiCard icon={ShoppingBag} tint="good" label="Cost per order" value={fmtMoney(t.blendedCpa, currency)} raw={t.blendedCpa} previous={p.blendedCpa} upIsGood={false} sub={`${fmtNumber(t.orders)} Shopify orders`} />
           </div>
 
           {daily.length > 1 && (

@@ -1,5 +1,6 @@
 import { fmtDate, fmtMoney, fmtMultiple, fmtNumber, fmtPercent } from "@/lib/format";
 import type { MetricsReport } from "@/lib/metrics";
+import { Megaphone, PieChart, ShoppingBag, TrendingUp } from "lucide-react";
 import { KpiCard } from "./KpiCard";
 import { ProfitBreakdown } from "./ProfitBreakdown";
 import { TimeSeriesChart } from "./charts/TimeSeriesChart";
@@ -14,8 +15,10 @@ export function ProfitOverview({ report, currency, adNote }: { report: MetricsRe
   return (
     <>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Revenue" value={fmtMoney(t.revenue, currency)} raw={t.revenue} previous={p.revenue} sub={`${fmtNumber(t.orders)} order${t.orders === 1 ? "" : "s"}`} />
+        <KpiCard icon={ShoppingBag} label="Revenue" value={fmtMoney(t.revenue, currency)} raw={t.revenue} previous={p.revenue} sub={`${fmtNumber(t.orders)} order${t.orders === 1 ? "" : "s"}`} />
         <KpiCard
+          icon={Megaphone}
+          tint="orange"
           label="Ad spend"
           value={fmtMoney(t.adSpend, currency)}
           raw={t.adSpend}
@@ -24,13 +27,15 @@ export function ProfitOverview({ report, currency, adNote }: { report: MetricsRe
           sub={t.adSpend > 0 ? `ROAS ${fmtMultiple(t.mer)} · CPA ${fmtMoney(t.blendedCpa, currency)}` : adNote}
         />
         <KpiCard
+          icon={TrendingUp}
+          featured
           label="Net profit"
           value={fmtMoney(t.netProfit, currency)}
           raw={t.netProfit}
           previous={p.netProfit}
           sub={t.orders > 0 ? `${fmtMoney(t.profitPerOrder, currency)} per order` : undefined}
         />
-        <KpiCard label="Margin" value={fmtPercent(t.margin, 1)} raw={t.margin} previous={p.margin} sub="of revenue" />
+        <KpiCard icon={PieChart} tint="good" label="Margin" value={fmtPercent(t.margin, 1)} raw={t.margin} previous={p.margin} sub="of revenue" />
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-5 lg:items-start">

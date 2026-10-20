@@ -104,7 +104,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             the background, and a scheduled sync runs daily. The buttons above sync right now. The endpoint below is for your own
             scheduler if you want more frequent syncs.
           </p>
-          <pre className="mt-3 overflow-x-auto rounded-lg bg-surface-2 p-3 text-xs">
+          <pre className="mt-3 overflow-x-auto rounded-xl bg-surface-2 p-3 text-xs">
 {`curl -H "Authorization: Bearer $CRON_SECRET" \\
   https://your-domain/api/cron/sync`}
           </pre>
