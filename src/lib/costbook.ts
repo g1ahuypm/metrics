@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "./db";
-import { Prisma } from "@prisma/client";
+import { Prisma, type Store } from "@prisma/client";
 import { costOrder, round2, tierKey, uncostedOrder, type CostBook, type Tier } from "./costing";
 
 /** Loads every cost tier and variant cost into memory for fast order costing. */
@@ -40,25 +40,35 @@ export type RepriceResult = { orders: number; changed: number };
 const differs = (a: number, b: number) => Math.abs(a - b) >= 0.005;
 
 /**
- * Re-prices stored orders with the current product costs and Expenses
- * assumptions. Scoped to orders containing any of `productIds` when given.
- * Only rows whose numbers actually change are written, in bulk.
+ * Re-prices stored orders with the current product costs and each store's
+ * Expenses assumptions. Scoped to one store and/or orders containing any of
+ * `productIds` when given. Only rows whose numbers actually change are written, in bulk.
  */
-export async function repriceOrders(scope: { productIds?: string[] } = {}): Promise<RepriceResult> {
-  const settings = await db.settings.findUnique({ where: { id: "default" } });
+export async function repriceOrders(scope: { storeId?: string; productIds?: string[] } = {}): Promise<RepriceResult> {
+  const stores = await db.store.findMany({ where: scope.storeId ? { id: scope.storeId } : {} });
+  const total: RepriceResult = { orders: 0, changed: 0 };
+  for (const store of stores) {
+    const r = await repriceStore(store, scope.productIds);
+    total.orders += r.orders;
+    total.changed += r.changed;
+  }
+  return total;
+}
+
+async function repriceStore(store: Store, productIds?: string[]): Promise<RepriceResult> {
   const cfg = {
-    paymentFeePercent: settings?.paymentFeePercent ?? 0,
-    paymentFeeFixed: settings?.paymentFeeFixed ?? 0,
-    platformFeePercent: settings?.platformFeePercent ?? 0,
-    defaultShippingCost: settings?.defaultShippingCost ?? 0,
-    defaultHandlingCost: settings?.defaultHandlingCost ?? 0,
+    paymentFeePercent: store.paymentFeePercent,
+    paymentFeeFixed: store.paymentFeeFixed,
+    platformFeePercent: store.platformFeePercent,
+    defaultShippingCost: store.defaultShippingCost,
+    defaultHandlingCost: store.defaultHandlingCost,
   };
-  const book = await loadCostBook(settings?.defaultCogsPercent ?? 0);
+  const book = await loadCostBook(store.defaultCogsPercent);
   const shopifyIdOf = new Map<string, string>();
   for (const [shopifyId, id] of book.internalId) shopifyIdOf.set(id, shopifyId);
 
   const orders = await db.order.findMany({
-    where: scope.productIds ? { lineItems: { some: { variant: { productId: { in: scope.productIds } } } } } : {},
+    where: { storeId: store.id, ...(productIds ? { lineItems: { some: { variant: { productId: { in: productIds } } } } } : {}) },
     select: {
       id: true, country: true, cancelledAt: true, total: true, cogs: true, shippingCost: true, handlingCost: true,
       transactionFees: true, platformFees: true, feesEstimated: true,

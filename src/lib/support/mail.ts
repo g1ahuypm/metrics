@@ -35,8 +35,8 @@ export function mailServers(): Pick<MailConfig, "imap" | "smtp"> {
   };
 }
 
-export async function getMailConfig(): Promise<MailConfig | null> {
-  const s = await db.settings.findUnique({ where: { id: "default" }, select: { supportEmail: true, supportAppPassword: true } });
+export async function getMailConfig(storeId: string): Promise<MailConfig | null> {
+  const s = await db.store.findUnique({ where: { id: storeId }, select: { supportEmail: true, supportAppPassword: true } });
   const password = decrypt(s?.supportAppPassword);
   if (!s?.supportEmail || !password) return null;
   return { email: s.supportEmail, password, ...mailServers() };

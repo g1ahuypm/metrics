@@ -1,6 +1,7 @@
 import { canEdit, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getSettingsRow } from "@/lib/integrations/config";
+import { getStoreScope, listStores } from "@/lib/stores";
+import { updateCostAssumptionsAction } from "@/lib/actions/settings";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { toISODate, todayUtc } from "@/lib/dates";
 import { COST_TYPE_LABELS, type CostType } from "@/lib/constants";
@@ -11,11 +12,17 @@ import { CustomCostForm, DeleteCostButton } from "./CustomCostForm";
 export default async function ExpensesPage() {
   const user = await requireUser();
   const editor = canEdit(user.role);
-  const [settings, customCosts] = await Promise.all([
-    getSettingsRow(),
-    db.customCost.findMany({ orderBy: [{ endDate: "asc" }, { startDate: "desc" }] }),
-  ]);
-  const currency = settings.currency;
+  const scope = await getStoreScope(user);
+  const store = scope.store;
+  const seesAll = scope.stores.length === (await listStores()).length;
+  // One store: its own expenses plus the shared ones. All stores: everything this person may see.
+  const customCosts = await db.customCost.findMany({
+    where: { OR: [{ storeId: { in: scope.storeIds } }, ...(seesAll || store ? [{ storeId: null }] : [])] },
+    orderBy: [{ endDate: "asc" }, { startDate: "desc" }],
+  });
+  const currency = (store ?? scope.stores[0])?.currency ?? "USD";
+  const storeOf = new Map(scope.stores.map((s) => [s.id, s]));
+  const many = scope.stores.length > 1;
   const today = new Date();
   const active = customCosts.filter((c) => !c.endDate || c.endDate >= today);
   const ended = customCosts.filter((c) => c.endDate && c.endDate < today);
@@ -39,6 +46,18 @@ export default async function ExpensesPage() {
             <td>
               <div className="font-medium">{c.name}</div>
               {c.notes && <div className="text-[11px] text-ink-3">{c.notes}</div>}
+              {many && (
+                <div className="mt-1">
+                  {c.storeId ? (
+                    <span className="badge">
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: storeOf.get(c.storeId)?.color }} aria-hidden="true" />
+                      {storeOf.get(c.storeId)?.name}
+                    </span>
+                  ) : (
+                    <span className="badge">Shared by all stores</span>
+                  )}
+                </div>
+              )}
             </td>
             <td className="text-ink-2">{c.category}</td>
             <td className="text-ink-2">{COST_TYPE_LABELS[c.type as CostType] ?? c.type}</td>
@@ -78,7 +97,12 @@ export default async function ExpensesPage() {
           </div>
           {editor && (
             <div className="px-4 pb-4">
-              <CustomCostForm today={toISODate(todayUtc())} />
+              <CustomCostForm
+                today={toISODate(todayUtc())}
+                stores={scope.stores.map((s) => ({ id: s.id, name: s.name }))}
+                defaultStore={store?.id ?? (seesAll ? "" : scope.stores[0]?.id ?? "")}
+                canShare={seesAll}
+              />
             </div>
           )}
           <div className="overflow-x-auto">{table(active)}</div>
@@ -91,13 +115,17 @@ export default async function ExpensesPage() {
         </div>
 
         <div className="card p-4">
-          <h2 className="text-sm font-semibold">Per-order assumptions</h2>
+          <h2 className="text-sm font-semibold">Per-order assumptions{store && many ? ` · ${store.name}` : ""}</h2>
           <p className="mt-1 text-xs text-ink-3">
             Applied to every order when the source data has no exact figure. Payment fees come straight from Shopify Payments
             when the order reports them.
           </p>
           <div className="mt-4">
-            <CostAssumptionsForm settings={settings} currency={currency} readOnly={!editor} />
+            {store ? (
+              <CostAssumptionsForm save={updateCostAssumptionsAction.bind(null, store.id)} settings={store} currency={currency} readOnly={!editor} />
+            ) : (
+              <p className="text-sm text-ink-2">Each store has its own. Pick a store at the top of the page to see or change them.</p>
+            )}
           </div>
         </div>
       </div>

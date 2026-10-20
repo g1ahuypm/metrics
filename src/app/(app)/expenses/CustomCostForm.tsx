@@ -7,12 +7,34 @@ import { COST_CATEGORIES, COST_TYPE_LABELS, COST_TYPES } from "@/lib/constants";
 import { FormMessage } from "@/components/FormMessage";
 import { SubmitButton } from "@/components/SubmitButton";
 
-export function CustomCostForm({ today }: { today: string }) {
+export function CustomCostForm({
+  today,
+  stores,
+  defaultStore,
+  canShare,
+}: {
+  today: string;
+  stores: { id: string; name: string }[];
+  defaultStore: string;
+  canShare: boolean;
+}) {
   const [state, action] = useActionState(addCustomCostAction, undefined);
   return (
     <form action={action} className="rounded-xl border border-border bg-surface-2 p-3">
       <FormMessage state={state} />
       <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+        {(stores.length > 1 || canShare) && stores.length > 0 && (
+          <div className="sm:col-span-2 lg:col-span-6">
+            <label className="label" htmlFor="cost-store">For which store</label>
+            <select id="cost-store" name="storeId" className="input" defaultValue={defaultStore}>
+              {stores.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+              {canShare && stores.length > 1 && <option value="">Shared by all stores (split by each store&apos;s sales)</option>}
+            </select>
+          </div>
+        )}
+        {stores.length === 1 && <input type="hidden" name="storeId" value={stores[0].id} />}
         <div className="lg:col-span-2">
           <label className="label">Name</label>
           <input name="name" required className="input" placeholder="Klaviyo, VA salary, agency fee…" />

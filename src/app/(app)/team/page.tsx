@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { canEdit, requireUser, ROLE_LABELS, type Role } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { allowedStores } from "@/lib/stores";
 import { fmtDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
 import { InviteForm, InviteRow, MemberRow } from "./TeamClient";
@@ -8,14 +9,16 @@ import { InviteForm, InviteRow, MemberRow } from "./TeamClient";
 export default async function TeamPage() {
   const me = await requireUser();
   const editor = canEdit(me.role);
-  const [members, invites] = await Promise.all([
-    db.user.findMany({ orderBy: [{ role: "asc" }, { createdAt: "asc" }] }),
+  const [members, invites, stores] = await Promise.all([
+    db.user.findMany({ orderBy: [{ role: "asc" }, { createdAt: "asc" }], include: { stores: { select: { storeId: true } } } }),
     db.invite.findMany({
       where: { acceptedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: "desc" },
       include: { createdBy: { select: { name: true } } },
     }),
+    allowedStores(me),
   ]);
+  const chips = stores.map((s) => ({ id: s.id, name: s.name, color: s.color }));
   const h = await headers();
   const proto = h.get("x-forwarded-proto") ?? "http";
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
@@ -28,17 +31,18 @@ export default async function TeamPage() {
         description="Everyone who can see this dashboard. Partners get read-only access to every report."
       />
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="card overflow-hidden lg:col-span-2">
+      <div className="grid gap-4 2xl:grid-cols-3">
+        <div className="card overflow-hidden 2xl:col-span-2">
           <div className="px-4 pt-4 pb-2">
             <h2 className="text-sm font-semibold">Members</h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="table">
+            <table className="table min-w-[720px]">
               <thead>
                 <tr>
                   <th>Name</th>
                   <th>Role</th>
+                  {chips.length > 1 && <th>Stores</th>}
                   <th>Last sign-in</th>
                   {editor && <th></th>}
                 </tr>
@@ -47,7 +51,8 @@ export default async function TeamPage() {
                 {members.map((m) => (
                   <MemberRow
                     key={m.id}
-                    member={{ id: m.id, name: m.name, email: m.email, role: m.role as Role, lastLoginAt: fmtDateTime(m.lastLoginAt) }}
+                    member={{ id: m.id, name: m.name, email: m.email, role: m.role as Role, lastLoginAt: fmtDateTime(m.lastLoginAt), storeIds: m.stores.map((s) => s.storeId) }}
+                    stores={chips}
                     me={me}
                     editor={editor}
                   />
@@ -63,7 +68,7 @@ export default async function TeamPage() {
               <h2 className="text-sm font-semibold">Invite someone</h2>
               <p className="mt-1 text-xs text-ink-3">Creates a link that works once and expires in 7 days.</p>
               <div className="mt-3">
-                <InviteForm isOwner={me.role === "OWNER"} />
+                <InviteForm isOwner={me.role === "OWNER"} stores={chips} />
               </div>
             </div>
           )}

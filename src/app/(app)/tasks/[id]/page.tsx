@@ -3,8 +3,8 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Bell, CheckCircle2, Clock, ExternalLink, MessageSquare, Pencil, PlusCircle, RotateCcw, UserRound, XCircle } from "lucide-react";
 import { canManageTasks, requireSignedIn } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getSettingsRow } from "@/lib/integrations/config";
 import { validTimezone } from "@/lib/scope";
+import { firstStoreTimezone } from "@/lib/stores";
 import { fmtDateTime } from "@/lib/format";
 import { dueGroup, dueLabel, fmtDue } from "@/lib/tasks/due";
 import { PriorityBadge } from "@/components/tasks/PriorityBadge";
@@ -44,23 +44,23 @@ function zoneName(tz: string): string {
 export default async function TaskPage({ params }: { params: Promise<{ id: string }> }) {
   const me = await requireSignedIn();
   const { id } = await params;
-  const [task, settings] = await Promise.all([
+  const [task] = await Promise.all([
     db.task.findUnique({
       where: { id },
       include: {
         assignee: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
+        store: { select: { name: true, color: true } },
         updates: { orderBy: { createdAt: "asc" }, include: { user: { select: { name: true } } } },
       },
     }),
-    getSettingsRow(),
   ]);
   const manager = canManageTasks(me.role);
   if (!task || (task.assigneeId !== me.id && task.createdById !== me.id && !manager)) notFound();
   // Opening the task counts as reading its inbox items.
   await db.notification.updateMany({ where: { userId: me.id, taskId: id, readAt: null }, data: { readAt: new Date() } });
 
-  const myTz = validTimezone(me.timeZone ?? settings.timezone);
+  const myTz = validTimezone(me.timeZone ?? (await firstStoreTimezone()));
   const isAssignee = task.assigneeId === me.id;
   const open = task.status === "open";
   const now = new Date();
@@ -86,6 +86,12 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
               </span>
             )}
             <PriorityBadge priority={task.priority} always />
+            {task.store && (
+              <span className="badge">
+                <span className="h-1.5 w-1.5 rounded-full" style={{ background: task.store.color }} aria-hidden="true" />
+                {task.store.name}
+              </span>
+            )}
           </div>
           <h1 className="text-[28px] font-extrabold tracking-tight">{task.title}</h1>
         </div>

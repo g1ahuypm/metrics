@@ -3,8 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { canManageTasks, requireSignedIn } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getSettingsRow } from "@/lib/integrations/config";
 import { validTimezone } from "@/lib/scope";
+import { firstStoreTimezone, getStoreScope } from "@/lib/stores";
 import { storeDate } from "@/lib/dates";
 import { DeleteTaskButton, TaskForm } from "../../TaskClient";
 
@@ -12,13 +12,13 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
   const me = await requireSignedIn();
   const { id } = await params;
   if (!canManageTasks(me.role)) redirect(`/tasks/${id}`);
-  const [task, members, settings] = await Promise.all([
+  const [task, members] = await Promise.all([
     db.task.findUnique({ where: { id } }),
     db.user.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, timeZone: true } }),
-    getSettingsRow(),
   ]);
   if (!task) notFound();
-  const tz = validTimezone(me.timeZone ?? settings.timezone);
+  const tz = validTimezone(me.timeZone ?? (await firstStoreTimezone()));
+  const scope = await getStoreScope(me);
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -34,6 +34,7 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
           members={members}
           today={storeDate(new Date(), tz)}
           myTimeZone={tz}
+          stores={scope.stores.map((s) => ({ id: s.id, name: s.name }))}
           values={{
             id,
             title: task.title,
@@ -44,6 +45,7 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
             dueTime: task.dueTime ?? "",
             priority: task.priority,
             link: task.link ?? "",
+            storeId: task.storeId ?? "",
           }}
         />
       </div>

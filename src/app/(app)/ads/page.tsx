@@ -23,20 +23,21 @@ function statusBadge(status: string) {
 }
 
 export default async function AdsPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {
-  await requireUser();
-  const { range } = await getScope(await searchParams);
+  const user = await requireUser();
+  const scope = await getScope(user, await searchParams);
+  const { range } = scope;
   const [report, status, detail, all, products] = await Promise.all([
-    getMetrics(range),
-    getDataStatus(),
-    getCampaignBreakdown(range),
-    getCampaignSummaries(range),
-    getProductOptions(),
+    getMetrics(range, scope),
+    getDataStatus(scope),
+    getCampaignBreakdown(range, scope),
+    getCampaignSummaries(range, scope),
+    getProductOptions(scope),
   ]);
   const titleOf = new Map(products.map((p) => [p.id, p.title]));
   const detailOf = new Map(detail.map((d) => [d.id, d]));
   const campaigns = all.filter((c) => c.spend > 0);
   const { totals: t, previous: p, daily } = report;
-  const currency = status.settings?.currency ?? "USD";
+  const currency = status.currency;
   const unlinked = campaigns.filter((c) => !c.productId);
 
   return (
@@ -118,7 +119,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
                               {titleOf.get(c.productId) ?? "Product"}
                             </Link>
                           ) : (
-                            <span className="text-xs text-warn-text">Not linked</span>
+                            <span className="text-xs text-warn-text">{c.storeId ? "Not linked" : "Not linked to a store"}</span>
                           )}
                         </td>
                         <td className="text-right tnum">{fmtMoney(c.spend, currency)}</td>

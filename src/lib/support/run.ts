@@ -1,12 +1,11 @@
 import "server-only";
 import { db } from "../db";
-import { getSettingsRow } from "../integrations/config";
 import { decide, type Article, type SupportDecision } from "./ai";
-import { DEFAULT_SIGNATURE, ensureKnowledgeBase } from "./knowledge";
+import { defaultSignature, ensureKnowledgeBase } from "./knowledge";
 import { fetchNewMail, getMailConfig, sendMail, type IncomingMail, type MailConfig } from "./mail";
 import { findOrders, orderNumbersIn } from "./orders";
 
-const SENDER_NAME = "LearnWell Customer Care";
+const senderName = (store: { name: string }) => `${store.name} Customer Care`;
 /** Safety limits on replies the AI sends by itself. */
 const AI_REPLIES_PER_DAY = 150;
 const AI_REPLIES_PER_THREAD_PER_DAY = 2; // stops reply loops with other auto-responders
@@ -17,24 +16,25 @@ export type SupportRunResult = { fetched: number; handled: number; autoSent: num
 // Storing incoming mail
 // ---------------------------------------------------------------------------
 
-async function storeIncoming(mail: IncomingMail, history: boolean): Promise<void> {
-  if (await db.supportMessage.findUnique({ where: { messageId: mail.messageId }, select: { id: true } })) return;
+async function storeIncoming(storeId: string, mail: IncomingMail, history: boolean): Promise<void> {
+  if (await db.supportMessage.findUnique({ where: { storeId_messageId: { storeId, messageId: mail.messageId } }, select: { id: true } })) return;
 
   // Same conversation: Gmail's thread id, else the message it replies to.
-  let thread = mail.gmailThreadId ? await db.supportThread.findUnique({ where: { key: `gm:${mail.gmailThreadId}` } }) : null;
+  let thread = mail.gmailThreadId ? await db.supportThread.findUnique({ where: { storeId_key: { storeId, key: `gm:${mail.gmailThreadId}` } } }) : null;
   if (!thread) {
     const parents = [mail.inReplyTo, ...mail.references].filter((x): x is string => Boolean(x));
     if (parents.length) {
-      const parent = await db.supportMessage.findFirst({ where: { messageId: { in: parents } }, select: { thread: true } });
+      const parent = await db.supportMessage.findFirst({ where: { storeId, messageId: { in: parents } }, select: { thread: true } });
       thread = parent?.thread ?? null;
     }
   }
-  const knownCustomer = await db.supportThread.count({ where: { customerEmail: mail.fromEmail, category: "customer" } });
+  const knownCustomer = await db.supportThread.count({ where: { storeId, customerEmail: mail.fromEmail, category: "customer" } });
   const skipAi = mail.automated && !knownCustomer;
 
   if (!thread) {
     thread = await db.supportThread.create({
       data: {
+        storeId,
         key: mail.gmailThreadId ? `gm:${mail.gmailThreadId}` : `msg:${mail.messageId}`,
         subject: mail.subject,
         customerEmail: mail.fromEmail,
@@ -59,6 +59,7 @@ async function storeIncoming(mail: IncomingMail, history: boolean): Promise<void
   await db.supportMessage.create({
     data: {
       threadId: thread.id,
+      storeId,
       messageId: mail.messageId,
       references: [...mail.references, mail.inReplyTo].filter(Boolean).join(" ") || null,
       direction: "in",
@@ -79,24 +80,26 @@ async function storeIncoming(mail: IncomingMail, history: boolean): Promise<void
 // Deciding and replying
 // ---------------------------------------------------------------------------
 
-async function loadArticles() {
-  return db.kbArticle.findMany({ orderBy: { sortOrder: "asc" } });
+async function loadArticles(storeId: string) {
+  return db.kbArticle.findMany({ where: { storeId }, orderBy: { sortOrder: "asc" } });
 }
 
 /** Asks the AI about a thread's latest customer message. Shared by the automatic run and "Draft with AI". */
 export async function decideThread(threadId: string, articles?: Awaited<ReturnType<typeof loadArticles>>) {
-  const [thread, settings] = await Promise.all([
-    // Arrival order, not the Date header: a customer's clock can be behind ours.
-    db.supportThread.findUniqueOrThrow({ where: { id: threadId }, include: { messages: { orderBy: [{ createdAt: "asc" }, { sentAt: "asc" }] } } }),
-    getSettingsRow(),
-  ]);
-  const kb = articles ?? (await loadArticles());
+  // Arrival order, not the Date header: a customer's clock can be behind ours.
+  const thread = await db.supportThread.findUniqueOrThrow({
+    where: { id: threadId },
+    include: { store: true, messages: { orderBy: [{ createdAt: "asc" }, { sentAt: "asc" }] } },
+  });
+  const settings = thread.store!;
+  const kb = articles ?? (await loadArticles(settings.id));
   const recent = thread.messages.slice(-12);
   const latestIn = [...thread.messages].reverse().find((m) => m.direction === "in");
   const customerText = thread.messages.filter((m) => m.direction === "in").map((m) => `${m.subject}\n${m.text}`).join("\n");
-  const { orders, unmatched } = await findOrders(thread.customerEmail, customerText);
+  const { orders, unmatched } = await findOrders(settings.id, thread.customerEmail, customerText);
   const result = await decide({
-    store: settings.storeName || "LearnWell Co",
+    store: settings.name,
+    about: settings.supportAbout,
     articles: kb.map((a): Article => ({ key: a.key, title: a.title, whenToUse: a.whenToUse, answer: a.answer })),
     customerEmail: thread.customerEmail,
     customerName: thread.customerName,
@@ -109,8 +112,8 @@ export async function decideThread(threadId: string, articles?: Awaited<ReturnTy
   return { thread, settings, kb, orders, result };
 }
 
-export function withSignature(reply: string, signature: string | null): string {
-  return `${reply.trim()}\n\n${(signature || DEFAULT_SIGNATURE).trim()}`;
+export function withSignature(reply: string, store: { name: string; supportSignature: string | null }): string {
+  return `${reply.trim()}\n\n${(store.supportSignature || defaultSignature(store.name)).trim()}`;
 }
 
 /** Why the AI's reply waits for a person instead of going out, or null when it may be sent. */
@@ -124,16 +127,20 @@ function holdReason(d: SupportDecision, article: { autoSend: boolean } | undefin
   return null;
 }
 
-async function aiRepliesSince(since: Date, threadId?: string) {
-  return db.supportMessage.count({ where: { direction: "out", sentBy: "AI", sentAt: { gte: since }, ...(threadId ? { threadId } : {}) } });
+async function aiRepliesSince(storeId: string, since: Date, threadId?: string) {
+  return db.supportMessage.count({ where: { storeId, direction: "out", sentBy: "AI", sentAt: { gte: since }, ...(threadId ? { threadId } : {}) } });
 }
 
 /** Sends a reply in a thread and records it. Used by the AI and by the team. */
 export async function sendThreadReply(cfg: MailConfig, threadId: string, text: string, sentBy: string) {
-  const thread = await db.supportThread.findUniqueOrThrow({ where: { id: threadId }, include: { messages: { orderBy: [{ createdAt: "asc" }, { sentAt: "asc" }] } } });
+  const thread = await db.supportThread.findUniqueOrThrow({
+    where: { id: threadId },
+    include: { store: { select: { name: true } }, messages: { orderBy: [{ createdAt: "asc" }, { sentAt: "asc" }] } },
+  });
   const lastIn = [...thread.messages].reverse().find((m) => m.direction === "in");
   const references = thread.messages.map((m) => m.messageId).slice(-10);
-  const { messageId } = await sendMail(cfg, SENDER_NAME, {
+  const sender = senderName(thread.store ?? { name: "Customer Care" });
+  const { messageId } = await sendMail(cfg, sender, {
     to: thread.customerEmail,
     subject: lastIn?.subject ?? thread.subject,
     text,
@@ -143,11 +150,12 @@ export async function sendThreadReply(cfg: MailConfig, threadId: string, text: s
   await db.supportMessage.create({
     data: {
       threadId,
+      storeId: thread.storeId,
       messageId,
       references: references.join(" "),
       direction: "out",
       fromEmail: cfg.email,
-      fromName: SENDER_NAME,
+      fromName: sender,
       toEmail: thread.customerEmail,
       subject: /^re:/i.test(lastIn?.subject ?? "") ? lastIn!.subject : `Re: ${lastIn?.subject ?? thread.subject}`,
       text,
@@ -192,7 +200,7 @@ async function handleThread(cfg: MailConfig, threadId: string, articles: Awaited
   }
 
   const article = kb.find((a) => a.key === d.topic);
-  const text = d.reply.trim() ? withSignature(d.reply, settings.supportSignature) : null;
+  const text = d.reply.trim() ? withSignature(d.reply, settings) : null;
   const actionNote = d.teamAction.trim() || (article?.flagForTeam ? d.summary : "") || null;
   let reason = onlyHistory
     ? "Arrived before Support was connected. Check it wasn't already answered in Gmail"
@@ -203,8 +211,8 @@ async function handleThread(cfg: MailConfig, threadId: string, articles: Awaited
   if (!reason && foreign.length) reason = `The reply mentions ${foreign.map((n) => `#${n}`).join(", ")}, which is not this customer's order`;
   if (!reason) {
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    if ((await aiRepliesSince(dayAgo, threadId)) >= AI_REPLIES_PER_THREAD_PER_DAY) reason = "Already answered twice today; a person should take over";
-    else if ((await aiRepliesSince(dayAgo)) >= AI_REPLIES_PER_DAY) reason = "Daily limit of automatic replies reached";
+    if ((await aiRepliesSince(settings.id, dayAgo, threadId)) >= AI_REPLIES_PER_THREAD_PER_DAY) reason = "Already answered twice today; a person should take over";
+    else if ((await aiRepliesSince(settings.id, dayAgo)) >= AI_REPLIES_PER_DAY) reason = "Daily limit of automatic replies reached";
   }
 
   const base = { category: "customer", topic: article?.key ?? null, summary: d.summary, orderNames, actionNote };
@@ -229,43 +237,43 @@ async function handleThread(cfg: MailConfig, threadId: string, articles: Awaited
 // ---------------------------------------------------------------------------
 
 /**
- * Checks the support inbox once. Only one run at a time (a lock in Settings),
+ * Checks one store's support inbox once. Only one run per store at a time (a lock on the store),
  * and it stops starting new AI work after `budgetMs` so it ends inside the
  * hosting time limit; whatever is left is picked up by the next run.
  */
-export async function runSupport(opts: { budgetMs?: number } = {}): Promise<SupportRunResult> {
+export async function runSupport(storeId: string, opts: { budgetMs?: number } = {}): Promise<SupportRunResult> {
   const started = Date.now();
   // New AI work only starts in this window; each call is capped at 40s, so a run ends inside 60s.
   const budget = opts.budgetMs ?? 12_000;
-  const cfg = await getMailConfig();
+  const cfg = await getMailConfig(storeId);
   if (!cfg) throw new Error("The support mailbox is not connected. Add the Gmail address and app password in Settings.");
 
   const now = new Date();
-  const lock = await db.settings.updateMany({
-    where: { id: "default", OR: [{ supportLockUntil: null }, { supportLockUntil: { lt: now } }] },
+  const lock = await db.store.updateMany({
+    where: { id: storeId, OR: [{ supportLockUntil: null }, { supportLockUntil: { lt: now } }] },
     data: { supportLockUntil: new Date(now.getTime() + 5 * 60 * 1000) },
   });
   if (lock.count === 0) return { fetched: 0, handled: 0, autoSent: 0, forTeam: 0, notCustomers: 0, message: "A check is already running" };
 
-  const log = await db.syncLog.create({ data: { source: "support", status: "running" } });
+  const log = await db.syncLog.create({ data: { source: "support", status: "running", storeId } });
   const out: SupportRunResult = { fetched: 0, handled: 0, autoSent: 0, forTeam: 0, notCustomers: 0, message: "" };
   try {
-    await ensureKnowledgeBase();
+    await ensureKnowledgeBase(storeId);
     // A run cut off by the hosting time limit leaves claimed but unanswered emails: release them.
     await db.supportMessage.updateMany({
-      where: { direction: "in", processedAt: { lt: new Date(Date.now() - 10 * 60 * 1000) }, thread: { status: "new", category: { not: "other" } } },
+      where: { storeId, direction: "in", processedAt: { lt: new Date(Date.now() - 10 * 60 * 1000) }, thread: { status: "new", category: { not: "other" } } },
       data: { processedAt: null },
     });
-    const s = await getSettingsRow();
+    const s = await db.store.findUniqueOrThrow({ where: { id: storeId } });
     const { mail, uidValidity, lastUid, firstScan } = await fetchNewMail(cfg, { uidValidity: s.supportUidValidity, lastUid: s.supportLastUid });
     // The first scan brings in the last 14 days, which may already have been answered in Gmail.
-    for (const m of mail.sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime())) await storeIncoming(m, firstScan);
+    for (const m of mail.sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime())) await storeIncoming(storeId, m, firstScan);
     out.fetched = mail.length;
-    await db.settings.update({ where: { id: "default" }, data: { supportUidValidity: uidValidity, supportLastUid: lastUid, lastSupportSyncAt: new Date() } });
+    await db.store.update({ where: { id: storeId }, data: { supportUidValidity: uidValidity, supportLastUid: lastUid, lastSupportSyncAt: new Date() } });
 
-    const articles = await loadArticles();
+    const articles = await loadArticles(storeId);
     const pending = await db.supportMessage.findMany({
-      where: { direction: "in", processedAt: null },
+      where: { storeId, direction: "in", processedAt: null },
       orderBy: { sentAt: "asc" },
       select: { threadId: true },
     });
@@ -291,6 +299,6 @@ export async function runSupport(opts: { budgetMs?: number } = {}): Promise<Supp
     await db.syncLog.update({ where: { id: log.id }, data: { status: "error", message, finishedAt: new Date() } });
     throw err;
   } finally {
-    await db.settings.update({ where: { id: "default" }, data: { supportLockUntil: null } });
+    await db.store.update({ where: { id: storeId }, data: { supportLockUntil: null } });
   }
 }

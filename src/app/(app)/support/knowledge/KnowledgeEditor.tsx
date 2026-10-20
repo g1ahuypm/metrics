@@ -7,15 +7,15 @@ import { deleteArticleAction, saveArticleAction } from "@/lib/actions/support";
 
 type Article = { id?: string; title: string; whenToUse: string; answer: string; autoSend: boolean; flagForTeam: boolean };
 
-export function KnowledgeEditor({ articles }: { articles: Article[] }) {
+export function KnowledgeEditor({ storeId, articles }: { storeId: string; articles: Article[] }) {
   const [adding, setAdding] = useState(false);
   return (
     <div className="space-y-2">
       {articles.map((a) => (
-        <ArticleCard key={a.id} article={a} />
+        <ArticleCard key={a.id} storeId={storeId} article={a} />
       ))}
       {adding ? (
-        <ArticleCard article={{ title: "", whenToUse: "", answer: "", autoSend: true, flagForTeam: false }} startOpen onCancel={() => setAdding(false)} />
+        <ArticleCard storeId={storeId} article={{ title: "", whenToUse: "", answer: "", autoSend: true, flagForTeam: false }} startOpen onCancel={() => setAdding(false)} />
       ) : (
         <button type="button" className="btn-secondary" onClick={() => setAdding(true)}>
           <Plus className="h-4 w-4" /> Add a topic
@@ -25,7 +25,7 @@ export function KnowledgeEditor({ articles }: { articles: Article[] }) {
   );
 }
 
-function ArticleCard({ article, startOpen = false, onCancel }: { article: Article; startOpen?: boolean; onCancel?: () => void }) {
+function ArticleCard({ storeId, article, startOpen = false, onCancel }: { storeId: string; article: Article; startOpen?: boolean; onCancel?: () => void }) {
   const router = useRouter();
   const [open, setOpen] = useState(startOpen);
   const [a, setA] = useState(article);
@@ -36,7 +36,7 @@ function ArticleCard({ article, startOpen = false, onCancel }: { article: Articl
   function save() {
     setMsg(null);
     start(async () => {
-      const r = await saveArticleAction(a);
+      const r = await saveArticleAction(storeId, a);
       setMsg(r?.error ? { ok: false, text: r.error } : { ok: true, text: r?.success ?? "Saved" });
       if (!r?.error) {
         if (!article.id) onCancel?.();

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { updateCostAssumptionsAction } from "@/lib/actions/settings";
+import type { FormState } from "@/lib/actions/auth";
 import { FormMessage } from "@/components/FormMessage";
 import { SubmitButton } from "@/components/SubmitButton";
 
@@ -24,8 +24,18 @@ function Field({ label, name, value, hint, readOnly, step = "0.01", max }: { lab
   );
 }
 
-export function CostAssumptionsForm({ settings, currency, readOnly }: { settings: Settings; currency: string; readOnly: boolean }) {
-  const [state, action] = useActionState(updateCostAssumptionsAction, undefined);
+export function CostAssumptionsForm({
+  save,
+  settings,
+  currency,
+  readOnly,
+}: {
+  save: (prev: FormState, formData: FormData) => Promise<FormState>;
+  settings: Settings;
+  currency: string;
+  readOnly: boolean;
+}) {
+  const [state, action] = useActionState(save, undefined);
   return (
     <form action={action} className="space-y-4">
       <FormMessage state={state} />

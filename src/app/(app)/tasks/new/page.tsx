@@ -4,8 +4,8 @@ import { addDays } from "date-fns";
 import { ArrowLeft } from "lucide-react";
 import { canManageTasks, requireSignedIn } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getSettingsRow } from "@/lib/integrations/config";
 import { validTimezone } from "@/lib/scope";
+import { firstStoreTimezone, getStoreScope } from "@/lib/stores";
 import { storeDate, toISODate } from "@/lib/dates";
 import { TaskForm } from "../TaskClient";
 
@@ -13,11 +13,11 @@ export default async function NewTaskPage({ searchParams }: { searchParams: Prom
   const me = await requireSignedIn();
   if (!canManageTasks(me.role)) redirect("/tasks");
   const sp = await searchParams;
-  const [members, settings] = await Promise.all([
+  const [members] = await Promise.all([
     db.user.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, timeZone: true } }),
-    getSettingsRow(),
   ]);
-  const tz = validTimezone(me.timeZone ?? settings.timezone);
+  const tz = validTimezone(me.timeZone ?? (await firstStoreTimezone()));
+  const scope = await getStoreScope(me);
   const today = storeDate(new Date(), tz);
   const tomorrow = toISODate(addDays(new Date(`${today}T00:00:00Z`), 1));
 
@@ -33,7 +33,8 @@ export default async function NewTaskPage({ searchParams }: { searchParams: Prom
           members={members}
           today={today}
           myTimeZone={tz}
-          values={{ title: "", details: "", doneMeans: "", assigneeId: members.some((m) => m.id === sp.for) ? sp.for! : "", dueDate: tomorrow, dueTime: "", priority: "normal", link: "" }}
+          stores={scope.stores.map((s) => ({ id: s.id, name: s.name }))}
+          values={{ title: "", details: "", doneMeans: "", assigneeId: members.some((m) => m.id === sp.for) ? sp.for! : "", dueDate: tomorrow, dueTime: "", priority: "normal", link: "", storeId: scope.store?.id ?? "" }}
         />
       </div>
     </div>

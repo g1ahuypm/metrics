@@ -18,10 +18,15 @@ function Thumb({ url }: { url: string | null }) {
 }
 
 export default async function ProductsPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {
-  await requireUser();
-  const { range } = await getScope(await searchParams);
-  const [{ products, unlinkedSpend }, costData, status] = await Promise.all([getProductSummaries(range), getProductCostData(), getDataStatus()]);
-  const currency = status.settings?.currency ?? "USD";
+  const user = await requireUser();
+  const scope = await getScope(user, await searchParams);
+  const { range } = scope;
+  const [{ products, unlinkedSpend }, costData, status] = await Promise.all([
+    getProductSummaries(range, scope),
+    getProductCostData(undefined, scope.storeIds),
+    getDataStatus(scope),
+  ]);
+  const currency = status.currency;
   const coverage = new Map(costData.map((p) => [p.productId, { ...costCoverage(p), isFreeGift: p.isFreeGift }]));
   const listed = new Set(products.map((p) => p.id));
   // Everything else, with the ones that need costs first.

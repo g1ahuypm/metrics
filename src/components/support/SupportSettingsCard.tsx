@@ -2,11 +2,14 @@
 
 import { useActionState, useState } from "react";
 import { CheckCircle2, Mail } from "lucide-react";
-import { saveSupportSettingsAction } from "@/lib/actions/support";
+import type { FormState } from "@/lib/actions/auth";
 import { FormMessage } from "@/components/FormMessage";
 import { SubmitButton } from "@/components/SubmitButton";
 
 export function SupportSettingsCard({
+  save,
+  storeName,
+  about,
   email,
   connected,
   autoReply,
@@ -15,6 +18,9 @@ export function SupportSettingsCard({
   aiReady,
   lastCheck,
 }: {
+  save: (prev: FormState, formData: FormData) => Promise<FormState>;
+  storeName: string;
+  about: string | null;
   email: string | null;
   connected: boolean;
   autoReply: boolean;
@@ -23,9 +29,10 @@ export function SupportSettingsCard({
   aiReady: boolean;
   lastCheck: string;
 }) {
-  const [state, action] = useActionState(saveSupportSettingsAction, undefined);
+  const [state, action] = useActionState(save, undefined);
   // Controlled, so a failed attempt doesn't reset what was typed (forms reset after every action).
-  const [address, setAddress] = useState(email ?? "learnwellsupport@gmail.com");
+  const [address, setAddress] = useState(email ?? "");
+  const [what, setWhat] = useState(about ?? "");
   const [auto, setAuto] = useState(autoReply);
   const [sig, setSig] = useState(signature ?? defaultSignature);
   return (
@@ -33,7 +40,7 @@ export function SupportSettingsCard({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold">
-            <Mail className="h-4 w-4" /> Support inbox (Gmail)
+            <Mail className="h-4 w-4" /> {storeName}: support inbox (Gmail)
           </h2>
           <p className="mt-1 text-xs text-ink-2">Your team reads and answers customer emails in Support, without logging in to Gmail.</p>
         </div>
@@ -74,6 +81,18 @@ export function SupportSettingsCard({
             </span>
           </label>
           <div>
+            <label className="label" htmlFor="support-about">What the store sells (one line, for the AI)</label>
+            <input
+              id="support-about"
+              name="about"
+              className="input"
+              value={what}
+              onChange={(e) => setWhat(e.target.value)}
+              placeholder="e.g. an online store selling children's books (main product: …)"
+              maxLength={300}
+            />
+          </div>
+          <div>
             <label className="label" htmlFor="support-signature">Signature at the end of every reply</label>
             <textarea id="support-signature" name="signature" className="input min-h-[120px]" value={sig} onChange={(e) => setSig(e.target.value)} />
           </div>
@@ -93,7 +112,7 @@ export function SupportSettingsCard({
             <ol className="list-decimal space-y-1 pl-5 text-ink-2">
               <li>Sign in to Google as the support address, and open myaccount.google.com/security.</li>
               <li>Turn on <strong className="font-medium text-ink">2-Step Verification</strong> (Google requires it for app passwords).</li>
-              <li>Open myaccount.google.com/apppasswords, type the name “LearnWell dashboard” and click Create.</li>
+              <li>Open myaccount.google.com/apppasswords, type the name “Margin dashboard” and click Create.</li>
               <li>Copy the 16 letters Google shows, paste them in the box on the left, and click Connect.</li>
             </ol>
             <p className="mt-1 text-xs text-ink-3">Paste it only into this page, never into a chat or email. You can remove it any time from the same Google page.</p>
@@ -102,7 +121,7 @@ export function SupportSettingsCard({
             <div className="mb-1 font-medium">Turn on the AI (once)</div>
             <ol className="list-decimal space-y-1 pl-5 text-ink-2">
               <li>Go to console.anthropic.com, sign in, add a payment method under Billing.</li>
-              <li>API keys → Create key, name it “LearnWell support”, copy it.</li>
+              <li>API keys → Create key, name it “Margin support”, copy it.</li>
               <li>Vercel → project “metrics” → Settings → Environment Variables → add <code className="text-xs">ANTHROPIC_API_KEY</code> with that key → Save, then Deployments → Redeploy.</li>
             </ol>
           </div>

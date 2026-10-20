@@ -1,8 +1,8 @@
 import { AlertTriangle, Bell, CheckCircle2, Clock, MessageSquare, PlusCircle, RotateCcw, UserRound, XCircle } from "lucide-react";
 import { requireSignedIn } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getSettingsRow } from "@/lib/integrations/config";
 import { validTimezone } from "@/lib/scope";
+import { firstStoreTimezone } from "@/lib/stores";
 import { fmtDateTime } from "@/lib/format";
 import { pushPublicKey } from "@/lib/push";
 import { markAllReadAction } from "@/lib/actions/inbox";
@@ -34,13 +34,12 @@ function ago(d: Date, now: Date, tz: string): string {
 
 export default async function InboxPage() {
   const me = await requireSignedIn();
-  const [items, settings, publicKey, devices] = await Promise.all([
+  const [items, publicKey, devices] = await Promise.all([
     db.notification.findMany({ where: { userId: me.id }, orderBy: { createdAt: "desc" }, take: 150 }),
-    getSettingsRow(),
     pushPublicKey(),
     db.pushSubscription.findMany({ where: { userId: me.id }, orderBy: { createdAt: "asc" }, select: { device: true } }),
   ]);
-  const tz = validTimezone(me.timeZone ?? settings.timezone);
+  const tz = validTimezone(me.timeZone ?? (await firstStoreTimezone()));
   const now = new Date();
   const unread = items.filter((n) => !n.readAt);
   const earlier = items.filter((n) => n.readAt);

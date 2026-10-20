@@ -79,10 +79,10 @@ export function DateRangePicker({ range }: { range: DateRange }) {
         <option value="custom">Custom</option>
       </select>
       {showCustom && (
-        <div className="flex items-center gap-1.5">
-          <input type="date" className="input w-auto py-1.5 text-xs" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <input type="date" aria-label="From" className="input w-auto min-w-0 py-1.5 text-xs" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           <span className="text-xs text-ink-3">to</span>
-          <input type="date" className="input w-auto py-1.5 text-xs" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
+          <input type="date" aria-label="To" className="input w-auto min-w-0 py-1.5 text-xs" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
           <button type="button" className="btn-secondary py-1.5 text-xs" onClick={applyCustom}>
             <CalendarDays className="h-3.5 w-3.5" /> Apply
           </button>

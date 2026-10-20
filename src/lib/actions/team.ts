@@ -5,6 +5,7 @@ import { addDays } from "date-fns";
 import { z } from "zod";
 import { db } from "../db";
 import { newToken, requireEditor, requireUser, ROLES } from "../auth";
+import { allowedStores } from "../stores";
 import type { FormState } from "./auth";
 
 export async function createInviteAction(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -19,11 +20,17 @@ export async function createInviteAction(_prev: FormState, formData: FormData): 
   if (parsed.data.role === "ADMIN" && me.role !== "OWNER") {
     return { error: "Only the owner can invite admins" };
   }
+  // Which stores the new member will see; with a single store, that one.
+  const mine = await allowedStores(me);
+  const picked = formData.getAll("storeIds").map(String);
+  const storeIds = mine.length === 1 ? [mine[0].id] : mine.filter((s) => picked.includes(s.id)).map((s) => s.id);
+  if (storeIds.length === 0) return { error: "Tick at least one store they should see" };
   await db.invite.create({
     data: {
       token: newToken(),
       email: parsed.data.email || null,
       role: parsed.data.role,
+      storeIds,
       createdById: me.id,
       expiresAt: addDays(new Date(), 7),
     },
@@ -75,4 +82,25 @@ export async function changePasswordAction(_prev: FormState, formData: FormData)
   if (!user || !(await verifyPassword(current, user.passwordHash))) return { error: "Current password is wrong" };
   await db.user.update({ where: { id: me.id }, data: { passwordHash: await hashPassword(next) } });
   return { success: "Password updated" };
+}
+
+/** Which stores a member sees. Admins can only hand out stores they see themselves. */
+export async function setMemberStoresAction(userId: string, storeIds: string[]): Promise<FormState> {
+  const me = await requireEditor();
+  const target = await db.user.findUnique({ where: { id: userId } });
+  if (!target) return { error: "User not found" };
+  if (target.role === "OWNER") return { error: "The owner always sees every store" };
+  if (target.role === "ADMIN" && me.role !== "OWNER") return { error: "Only the owner can change an admin's stores" };
+  const mine = new Set((await allowedStores(me)).map((s) => s.id));
+  const wanted = new Set(storeIds.filter((id) => mine.has(id)));
+  const current = await db.userStore.findMany({ where: { userId }, select: { storeId: true } });
+  // Stores the editor can't see stay as they are.
+  const remove = current.filter((c) => mine.has(c.storeId) && !wanted.has(c.storeId)).map((c) => c.storeId);
+  const add = [...wanted].filter((id) => !current.some((c) => c.storeId === id));
+  await db.$transaction([
+    db.userStore.deleteMany({ where: { userId, storeId: { in: remove } } }),
+    db.userStore.createMany({ data: add.map((storeId) => ({ userId, storeId })), skipDuplicates: true }),
+  ]);
+  revalidatePath("/team");
+  return { success: "Saved" };
 }

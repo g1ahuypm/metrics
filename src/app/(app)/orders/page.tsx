@@ -8,10 +8,14 @@ import { DateRangePicker } from "@/components/DateRangePicker";
 import { EmptyState } from "@/components/EmptyState";
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {
-  await requireUser();
-  const { range } = await getScope(await searchParams);
-  const [orders, status] = await Promise.all([getOrderRows(range), getDataStatus()]);
-  const currency = status.settings?.currency ?? "USD";
+  const user = await requireUser();
+  const scope = await getScope(user, await searchParams);
+  const { range } = scope;
+  const [orders, status] = await Promise.all([getOrderRows(range, scope), getDataStatus(scope)]);
+  const currency = status.currency;
+  // Several stores on screen: say which store each order is from, in that store's own time.
+  const storeOf = new Map(status.stores.map((s) => [s.id, s]));
+  const many = status.stores.length > 1;
   const sum = (k: "revenue" | "productCost" | "shippingCost" | "fees" | "profit") => orders.reduce((s, o) => s + o[k], 0);
 
   return (
@@ -29,6 +33,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
               <thead>
                 <tr>
                   <th>Order</th>
+                  {many && <th>Store</th>}
                   <th>Placed</th>
                   <th>Ships to</th>
                   <th>Items</th>
@@ -46,7 +51,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       {o.name}
                       {o.cancelled && <span className="badge ml-2">Cancelled</span>}
                     </td>
-                    <td className="whitespace-nowrap text-ink-2">{fmtDateTime(o.createdAt, range.tz)}</td>
+                    {many && (
+                      <td className="whitespace-nowrap text-ink-2">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full" style={{ background: storeOf.get(o.storeId ?? "")?.color }} aria-hidden="true" />
+                          {storeOf.get(o.storeId ?? "")?.name ?? "—"}
+                        </span>
+                      </td>
+                    )}
+                    <td className="whitespace-nowrap text-ink-2">{fmtDateTime(o.createdAt, storeOf.get(o.storeId ?? "")?.timezone ?? range.tz)}</td>
                     <td className="text-ink-2">{o.country ? marketLabel(o.country) : "—"}</td>
                     <td className="max-w-[320px] truncate text-ink-2" title={o.items}>{o.items}</td>
                     <td className="text-right tnum">{fmtMoney(o.revenue, currency)}</td>
@@ -57,7 +70,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                   </tr>
                 ))}
                 <tr className="font-semibold">
-                  <td colSpan={4}>
+                  <td colSpan={many ? 5 : 4}>
                     {fmtNumber(orders.length)} order{orders.length === 1 ? "" : "s"}
                   </td>
                   <td className="text-right tnum">{fmtMoney(sum("revenue"), currency)}</td>

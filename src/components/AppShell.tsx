@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { AlertTriangle, Bell, CheckSquare, LayoutDashboard, LifeBuoy, LogOut, Megaphone, MoreHorizontal, Package, Receipt, Settings, ShoppingBag, Users, X } from "lucide-react";
 import { Logo } from "./Logo";
 import { DeviceSetup } from "./DeviceSetup";
+import { StoreSwitcher, type SwitcherStore } from "./StoreSwitcher";
 import { logoutAction } from "@/lib/actions/auth";
 import { canEdit, canSupport, ROLE_LABELS, type SessionUser } from "@/lib/auth-shared";
 
@@ -28,6 +29,8 @@ const SETUP = [
 export function AppShell({
   user,
   storeName,
+  stores,
+  currentStore,
   supportCount,
   inboxCount,
   overdueCount,
@@ -35,6 +38,8 @@ export function AppShell({
 }: {
   user: SessionUser;
   storeName: string;
+  stores: SwitcherStore[];
+  currentStore: string | null;
   supportCount: number;
   inboxCount: number;
   overdueCount: number;
@@ -199,6 +204,7 @@ export function AppShell({
       <main className="min-w-0 px-4 pb-32 pt-2 sm:px-6 lg:px-4 lg:pb-10 lg:pt-4">
         <div className="mx-auto max-w-7xl">
           {overdueBar}
+          {!/^\/(tasks|inbox|team)(\/|$)|^\/products\/./.test(pathname) && <StoreSwitcher stores={stores} current={currentStore} />}
           {children}
         </div>
       </main>

@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { AlertTriangle } from "lucide-react";
 import { canEdit, requireSupport } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getSettingsRow } from "@/lib/integrations/config";
+import { getStoreScope } from "@/lib/stores";
 import { validTimezone } from "@/lib/scope";
 import { maybeCheckSupport } from "@/lib/autosync";
 import { fmtDateTime } from "@/lib/format";
@@ -25,31 +25,36 @@ export default async function SupportInboxPage({ searchParams }: { searchParams:
   const search: Prisma.SupportThreadWhereInput = q
     ? { OR: [{ customerEmail: { contains: q, mode: "insensitive" } }, { customerName: { contains: q, mode: "insensitive" } }, { subject: { contains: q, mode: "insensitive" } }, { orderNames: { contains: q, mode: "insensitive" } }] }
     : {};
-  await maybeCheckSupport();
-  const [settings, threads, counts, articles] = await Promise.all([
-    getSettingsRow(),
+  const scope = await getStoreScope(user);
+  const inScope = { storeId: { in: scope.storeIds } };
+  await maybeCheckSupport(scope.storeIds);
+  const [threads, counts, articles] = await Promise.all([
     db.supportThread.findMany({
-      where: { ...tab.where, ...search },
+      where: { ...tab.where, ...search, ...inScope },
       orderBy: { lastMessageAt: "desc" },
       take: 200,
       include: { messages: { orderBy: { sentAt: "desc" }, take: 1, select: { text: true, direction: true } } },
     }),
-    Promise.all(TABS.map((t) => db.supportThread.count({ where: t.where }))),
-    db.kbArticle.findMany({ select: { key: true, title: true } }),
+    Promise.all(TABS.map((t) => db.supportThread.count({ where: { ...t.where, ...inScope } }))),
+    db.kbArticle.findMany({ where: inScope, select: { storeId: true, key: true, title: true } }),
   ]);
-  const tz = validTimezone(settings.timezone);
-  const topicTitle = new Map(articles.map((a) => [a.key, a.title]));
-  const connected = Boolean(settings.supportEmail && settings.supportAppPassword);
+  const tz = validTimezone(user.timeZone ?? scope.timezone);
+  const topicTitle = new Map(articles.map((a) => [`${a.storeId}:${a.key}`, a.title]));
+  const shown = scope.stores.filter((s) => scope.storeIds.includes(s.id));
+  const storeOf = new Map(shown.map((s) => [s.id, s]));
+  const mailboxes = shown.filter((s) => s.supportEmail && s.supportAppPassword);
+  const connected = mailboxes.length > 0;
+  const lastCheck = mailboxes.reduce<Date | null>((a, s) => (s.lastSupportSyncAt && (!a || s.lastSupportSyncAt > a) ? s.lastSupportSyncAt : a), null);
 
   return (
     <div>
-      <SupportHeader active="inbox" mailbox={connected ? settings.supportEmail : null} lastCheck={settings.lastSupportSyncAt} timeZone={tz} />
+      <SupportHeader active="inbox" mailbox={mailboxes.length === 1 ? mailboxes[0].supportEmail : connected ? `${mailboxes.length} store inboxes` : null} lastCheck={lastCheck} timeZone={tz} />
 
       {!connected && (
         <div className="mb-4 flex flex-col gap-2 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-2 text-ink-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn-text" />
-            The support Gmail is not connected yet.{canEdit(user.role) ? "" : " Ask the owner to connect it."}
+            {shown.length > 1 ? "No support Gmail is connected for these stores yet." : "The support Gmail is not connected yet."}{canEdit(user.role) ? "" : " Ask the owner to connect it."}
           </div>
           {canEdit(user.role) && (
             <Link href="/settings#support" className="btn-secondary py-1.5 text-xs">
@@ -100,7 +105,13 @@ export default async function SupportInboxPage({ searchParams }: { searchParams:
                 <span className="block truncate text-xs text-ink-3">{preview}</span>
                 <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <StatusBadge status={t.status} category={t.category} />
-                  {t.topic && <span className="badge">{topicTitle.get(t.topic) ?? t.topic}</span>}
+                  {shown.length > 1 && t.storeId && (
+                    <span className="badge">
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: storeOf.get(t.storeId)?.color }} aria-hidden="true" />
+                      {storeOf.get(t.storeId)?.name}
+                    </span>
+                  )}
+                  {t.topic && <span className="badge">{topicTitle.get(`${t.storeId}:${t.topic}`) ?? t.topic}</span>}
                   {t.orderNames && <span className="badge">{t.orderNames}</span>}
                   {t.status === "needs_action" && t.actionNote && <span className="truncate text-xs text-accent">To do: {t.actionNote}</span>}
                   {t.status === "needs_reply" && t.holdReason && <span className="truncate text-xs text-ink-3">{t.holdReason}</span>}

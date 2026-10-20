@@ -4,8 +4,9 @@ import { db } from "../db";
 import { costOrder, round2, uncostedOrder } from "../costing";
 import { countryFromCurrency } from "../constants";
 import { loadCostBook, repriceOrders } from "../costbook";
+import { recomputeCampaignStores } from "../stores";
 import { decrypt, encrypt } from "../crypto";
-import type { IntegrationConfig, ShopifyAuth } from "./config";
+import type { StoreConfig, ShopifyAuth } from "./config";
 
 const API_VERSION = "2025-07";
 
@@ -115,7 +116,7 @@ export async function getShopifyToken(auth: ShopifyAuth, force = false): Promise
   if (!force && inMemory && inMemory.expiresAt.getTime() - now > TOKEN_MARGIN_MS) return inMemory.token;
 
   if (!force) {
-    const row = await db.settings.findUnique({ where: { id: "default" }, select: { shopifyToken: true, shopifyTokenExpires: true } });
+    const row = await db.store.findUnique({ where: { id: auth.storeId }, select: { shopifyToken: true, shopifyTokenExpires: true } });
     const cached = decrypt(row?.shopifyToken);
     if (cached && row?.shopifyTokenExpires && row.shopifyTokenExpires.getTime() - now > TOKEN_MARGIN_MS) {
       tokenCache.set(key, { token: cached, expiresAt: row.shopifyTokenExpires });
@@ -125,8 +126,8 @@ export async function getShopifyToken(auth: ShopifyAuth, force = false): Promise
 
   const fresh = await fetchClientCredentialsToken(auth);
   tokenCache.set(key, fresh);
-  await db.settings.update({
-    where: { id: "default" },
+  await db.store.update({
+    where: { id: auth.storeId },
     data: { shopifyToken: encrypt(fresh.token), shopifyTokenExpires: fresh.expiresAt },
   });
   return fresh.token;
@@ -224,7 +225,7 @@ query Orders($cursor: String, $query: String) {
   }
 }`;
 
-export async function syncShopifyVariants(cfg: IntegrationConfig): Promise<number> {
+export async function syncShopifyVariants(cfg: StoreConfig): Promise<number> {
   if (!cfg.shopify) throw new Error("Shopify is not connected");
   let cursor: string | null = null;
   let count = 0;
@@ -238,6 +239,7 @@ export async function syncShopifyVariants(cfg: IntegrationConfig): Promise<numbe
         where: { shopifyId: v.id },
         create: {
           shopifyId: v.id,
+          storeId: cfg.storeId,
           productId: v.product.id,
           productTitle: v.product.title,
           variantTitle: v.title,
@@ -248,6 +250,7 @@ export async function syncShopifyVariants(cfg: IntegrationConfig): Promise<numbe
           imageUrl: v.media.nodes[0]?.preview?.image?.url ?? v.product.featuredMedia?.preview?.image?.url ?? null,
         },
         update: {
+          storeId: cfg.storeId,
           productId: v.product.id,
           productTitle: v.product.title,
           variantTitle: v.title,
@@ -264,7 +267,7 @@ export async function syncShopifyVariants(cfg: IntegrationConfig): Promise<numbe
   return count;
 }
 
-export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Promise<number> {
+export async function syncShopifyOrders(cfg: StoreConfig, since: Date): Promise<number> {
   if (!cfg.shopify) throw new Error("Shopify is not connected");
 
   // Supplier cost tiers (Product costs page) win over Shopify's cost per item.
@@ -343,6 +346,7 @@ export async function syncShopifyOrders(cfg: IntegrationConfig, since: Date): Pr
 
       const base = {
         name: o.name,
+        storeId: cfg.storeId,
         createdAt: new Date(o.createdAt),
         processedAt: o.processedAt ? new Date(o.processedAt) : null,
         cancelledAt: o.cancelledAt ? new Date(o.cancelledAt) : null,
@@ -412,11 +416,11 @@ export async function recomputeNewCustomers(): Promise<void> {
   });
 }
 
-export async function syncShopify(cfg: IntegrationConfig, opts: { full?: boolean } = {}): Promise<{ variants: number; orders: number }> {
+export async function syncShopify(cfg: StoreConfig, opts: { full?: boolean } = {}): Promise<{ variants: number; orders: number }> {
   if (!cfg.shopify) throw new Error("Shopify is not connected");
   // Reports split days in the store's own timezone, exactly like Shopify Analytics.
   const shop = await shopifyGraphQL<{ shop: { ianaTimezone: string; currencyCode: string } }>(cfg.shopify, `{ shop { ianaTimezone currencyCode } }`);
-  await db.settings.update({ where: { id: "default" }, data: { timezone: shop.shop.ianaTimezone, currency: shop.shop.currencyCode } });
+  await db.store.update({ where: { id: cfg.storeId }, data: { timezone: shop.shop.ianaTimezone, currency: shop.shop.currencyCode } });
   const variants = await syncShopifyVariants(cfg);
   // Re-pull the last few days on every run so refunds and edits are captured.
   // Custom apps can read 60 days of orders, so the first (or a full) run asks for exactly that.
@@ -424,7 +428,9 @@ export async function syncShopify(cfg: IntegrationConfig, opts: { full?: boolean
   const orders = await syncShopifyOrders(cfg, since);
   // Older orders were not re-pulled; bring them in line with any cost changes
   // (e.g. a new Shopify cost per item). Only rows that change are written.
-  await repriceOrders();
-  await db.settings.update({ where: { id: "default" }, data: { lastShopifySyncAt: new Date() } });
+  await repriceOrders({ storeId: cfg.storeId });
+  // A product's store is known now, so campaigns linked to it count for that store.
+  await recomputeCampaignStores();
+  await db.store.update({ where: { id: cfg.storeId }, data: { lastShopifySyncAt: new Date() } });
   return { variants, orders };
 }

@@ -1,6 +1,9 @@
 import "server-only";
 import { db } from "./db";
+import { addDays, subDays } from "date-fns";
+import type { Prisma } from "@prisma/client";
 import { dayEnd, dayStart, daysInUtcMonth, eachDay, endOfUtcDay, storeDate, toISODate, utcDay, type DateRange } from "./dates";
+import { validTimezone } from "./scope";
 import { safeDiv } from "./format";
 
 /** Round to cents so sums of many floating-point values never show drift. */
@@ -175,9 +178,9 @@ const orderSelect = {
  * reports do: the sync stores what the customer was charged minus refunds and no
  * product or shipping cost, so one cancelled and refunded nets to zero.
  */
-async function loadOrderSlices(start: Date, end: Date, productId?: string): Promise<OrderSlice[]> {
+async function loadOrderSlices(start: Date, end: Date, storeId: string, productId?: string): Promise<OrderSlice[]> {
   if (!productId) {
-    const orders = await db.order.findMany({ where: { createdAt: { gte: start, lt: end } }, select: orderSelect });
+    const orders = await db.order.findMany({ where: { storeId, createdAt: { gte: start, lt: end } }, select: orderSelect });
     return orders.map((o) => ({
       orderId: o.id,
       name: o.name,
@@ -204,7 +207,7 @@ async function loadOrderSlices(start: Date, end: Date, productId?: string): Prom
   // cost, tier shipping) are exact; order-level amounts (tax, shipping charged,
   // fees, refunds, discounts, handling) are split by the product's share of the order.
   const orders = await db.order.findMany({
-    where: { createdAt: { gte: start, lt: end }, lineItems: { some: { variant: { productId } } } },
+    where: { storeId, createdAt: { gte: start, lt: end }, lineItems: { some: { variant: { productId } } } },
     select: {
       ...orderSelect,
       lineItems: { select: { price: true, listPrice: true, quantity: true, unitCost: true, shippingCost: true, costSource: true, variant: { select: { productId: true } } } },
@@ -242,7 +245,36 @@ async function loadOrderSlices(start: Date, end: Date, productId?: string): Prom
   });
 }
 
-async function loadDaily(from: Date, to: Date, tz: string, productId?: string): Promise<DailyPoint[]> {
+/** A store's revenue (charged − refunded) per calendar day in its own time zone, for sharing out expenses. */
+type StoreRevenue = { byStore: Map<string, Map<string, number>>; storeCount: number };
+
+async function storeRevenueByDay(from: Date, to: Date): Promise<StoreRevenue> {
+  const stores = await db.store.findMany({ select: { id: true, timezone: true } });
+  const tzOf = new Map(stores.map((s) => [s.id, validTimezone(s.timezone)]));
+  // A day either side covers every time zone.
+  const rows = await db.order.findMany({
+    where: { createdAt: { gte: subDays(from, 1), lt: addDays(endOfUtcDay(to), 1) } },
+    select: { storeId: true, createdAt: true, total: true, refunded: true },
+  });
+  const byStore = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    if (!r.storeId) continue;
+    const m = byStore.get(r.storeId) ?? new Map<string, number>();
+    const k = storeDate(r.createdAt, tzOf.get(r.storeId) ?? "UTC");
+    m.set(k, (m.get(k) ?? 0) + r.total - r.refunded);
+    byStore.set(r.storeId, m);
+  }
+  return { byStore, storeCount: stores.length };
+}
+
+type StoreRef = { id: string; timezone: string };
+
+/**
+ * One store's figures per calendar day in its own time zone (or one product's, when given).
+ * Expenses: the store's own, plus its share of shared ones (split by the stores' revenue that day).
+ */
+async function loadDaily(from: Date, to: Date, store: StoreRef, productId: string | undefined, revenue: StoreRevenue | null): Promise<DailyPoint[]> {
+  const tz = validTimezone(store.timezone);
   const days = eachDay(from, to);
   const map = new Map<string, DailyPoint>(days.map((d) => [d, emptyDay(d)]));
   const toEnd = endOfUtcDay(to);
@@ -250,31 +282,24 @@ async function loadDaily(from: Date, to: Date, tz: string, productId?: string): 
   const start = dayStart(from, tz);
   const end = dayEnd(to, tz);
 
-  const [orders, insights, customCosts, totalRevenueByDay] = await Promise.all([
-    loadOrderSlices(start, end, productId),
+  const [orders, insights, customCosts] = await Promise.all([
+    loadOrderSlices(start, end, store.id, productId),
     db.adInsight.findMany({
-      where: { date: { gte: from, lte: toEnd }, ...(productId ? { campaign: { productId } } : {}) },
+      where: { date: { gte: from, lte: toEnd }, campaign: productId ? { productId } : { storeId: store.id } },
       select: {
         date: true, spend: true, impressions: true, reach: true, clicks: true, purchases: true, purchaseValue: true,
         addToCart: true, initiateCheckout: true,
       },
     }),
     db.customCost.findMany({
-      where: { startDate: { lte: toEnd }, OR: [{ endDate: null }, { endDate: { gte: from } }] },
+      where: {
+        AND: [
+          { OR: [{ storeId: store.id }, { storeId: null }] },
+          { startDate: { lte: toEnd } },
+          { OR: [{ endDate: null }, { endDate: { gte: from } }] },
+        ],
+      },
     }),
-    // Store-wide revenue per day, used to allocate shared expenses to a product.
-    productId
-      ? db.order
-          .findMany({ where: { createdAt: { gte: start, lt: end } }, select: { createdAt: true, total: true, refunded: true } })
-          .then((rows) => {
-            const m = new Map<string, number>();
-            for (const r of rows) {
-              const k = storeDate(r.createdAt, tz);
-              m.set(k, (m.get(k) ?? 0) + r.total - r.refunded);
-            }
-            return m;
-          })
-      : Promise.resolve(null as Map<string, number> | null),
   ]);
 
   for (const o of orders) {
@@ -297,31 +322,30 @@ async function loadDaily(from: Date, to: Date, tz: string, productId?: string): 
     else d.returningCustomers += 1;
   }
 
-  for (const i of insights) {
-    const d = map.get(toISODate(utcDay(i.date)));
-    if (!d) continue;
-    d.adSpend += i.spend;
-    d.impressions += i.impressions;
-    d.reach += i.reach;
-    d.clicks += i.clicks;
-    d.adPurchases += i.purchases;
-    d.adPurchaseValue += i.purchaseValue;
-    d.addToCart += i.addToCart;
-    d.initiateCheckout += i.initiateCheckout;
-  }
+  addInsights(map, insights);
 
   // Custom costs, allocated per day. Percent-of-revenue costs need the day's
   // revenue, so compute revenue first.
   for (const d of map.values()) d.revenue = d.grossSales - d.discounts - d.refunds + d.shippingCharged + d.tax;
 
+  const storeRev = revenue?.byStore.get(store.id);
   for (const c of customCosts) {
     const start = utcDay(c.startDate);
     const end = c.endDate ? utcDay(c.endDate) : null;
     for (const d of map.values()) {
       const day = new Date(`${d.date}T00:00:00.000Z`);
       if (day < start || (end && day > end)) continue;
-      // In product view, fixed expenses are shared out by the product's share of that day's revenue.
-      const share = totalRevenueByDay ? (() => { const t = totalRevenueByDay.get(d.date) ?? 0; return t > 0 ? d.revenue / t : 0; })() : 1;
+      // In product view, fixed expenses are shared out by the product's share of that day's store revenue.
+      const productShare = productId ? (() => { const t = storeRev?.get(d.date) ?? 0; return t > 0 ? d.revenue / t : 0; })() : 1;
+      // A shared fixed expense is split between the stores by their revenue that day (evenly on a day nobody sold).
+      const storeShare = c.storeId === null && revenue && revenue.storeCount > 1
+        ? (() => {
+            let all = 0;
+            for (const m of revenue.byStore.values()) all += m.get(d.date) ?? 0;
+            return all > 0 ? (storeRev?.get(d.date) ?? 0) / all : 1 / revenue.storeCount;
+          })()
+        : 1;
+      const share = productShare * storeShare;
       let amount = 0;
       switch (c.type) {
         case "MONTHLY": amount = (c.amount / daysInUtcMonth(day)) * share; break;
@@ -338,6 +362,59 @@ async function loadDaily(from: Date, to: Date, tz: string, productId?: string): 
 
   for (const d of map.values()) finalize(d);
   return days.map((k) => map.get(k)!);
+}
+
+type InsightRow = {
+  date: Date; spend: number; impressions: number; reach: number; clicks: number; purchases: number; purchaseValue: number;
+  addToCart: number; initiateCheckout: number;
+};
+
+function addInsights(map: Map<string, DailyPoint>, insights: InsightRow[]): void {
+  for (const i of insights) {
+    const d = map.get(toISODate(utcDay(i.date)));
+    if (!d) continue;
+    d.adSpend += i.spend;
+    d.impressions += i.impressions;
+    d.reach += i.reach;
+    d.clicks += i.clicks;
+    d.adPurchases += i.purchases;
+    d.adPurchaseValue += i.purchaseValue;
+    d.addToCart += i.addToCart;
+    d.initiateCheckout += i.initiateCheckout;
+  }
+}
+
+/** Campaigns not linked to any store yet, in ad accounts these stores use. */
+const unlinkedCampaigns = (storeIds: string[]): Prisma.CampaignWhereInput => ({
+  storeId: null,
+  adAccount: { stores: { some: { storeId: { in: storeIds } } } },
+});
+
+/** Spend from shared ad accounts that isn't linked to a store yet: counted in "All stores" so nothing goes missing. */
+async function loadUnlinkedDaily(from: Date, to: Date, storeIds: string[]): Promise<DailyPoint[]> {
+  const days = eachDay(from, to);
+  const map = new Map<string, DailyPoint>(days.map((d) => [d, emptyDay(d)]));
+  const insights = await db.adInsight.findMany({
+    where: { date: { gte: from, lte: endOfUtcDay(to) }, campaign: unlinkedCampaigns(storeIds) },
+  });
+  addInsights(map, insights);
+  for (const d of map.values()) finalize(d);
+  return days.map((k) => map.get(k)!);
+}
+
+/** Adds several stores' days together (same calendar date = same row). */
+function mergeDaily(lists: DailyPoint[][], days: string[]): DailyPoint[] {
+  const out = days.map((d) => emptyDay(d));
+  for (const list of lists) {
+    list.forEach((p, i) => {
+      const o = out[i];
+      for (const k of MONEY_KEYS) o[k] += p[k];
+      for (const k of COUNT_KEYS) o[k] += p[k];
+      for (const [cat, v] of Object.entries(p.customCostBreakdown)) o.customCostBreakdown[cat] = (o.customCostBreakdown[cat] ?? 0) + v;
+    });
+  }
+  for (const o of out) finalize(o);
+  return out;
 }
 
 export function summarize(daily: DailyPoint[]): Totals {
@@ -383,19 +460,72 @@ export function summarize(daily: DailyPoint[]): Totals {
   return t;
 }
 
+export type StoreTotals = { id: string; name: string; color: string; totals: Totals };
+
 export type MetricsReport = {
   range: DateRange;
   daily: DailyPoint[];
   totals: Totals;
   previous: Totals;
+  /** Each store's own totals, when several stores are combined. */
+  byStore: StoreTotals[];
+  /** Spend from shared ad accounts not yet linked to a store (included in totals). */
+  unlinkedSpend: number;
 };
 
-export async function getMetrics(range: DateRange, productId?: string, opts: { previous?: boolean } = {}): Promise<MetricsReport> {
-  const [daily, prevDaily] = await Promise.all([
-    loadDaily(range.from, range.to, range.tz, productId),
-    opts.previous === false ? Promise.resolve([]) : loadDaily(range.prevFrom, range.prevTo, range.tz, productId),
+/** The stores a product belongs to (one, unless the same product id exists in two shops). */
+async function productStores(productId: string, storeIds?: string[]) {
+  const rows = await db.productVariant.findMany({ where: { productId, storeId: storeIds ? { in: storeIds } : { not: null } }, select: { storeId: true }, distinct: ["storeId"] });
+  return rows.map((r) => r.storeId!);
+}
+
+/**
+ * Figures for the stores in scope (one store, or several added up), or for one product.
+ * Every store is counted in its own time zone, exactly like its Shopify reports.
+ */
+export async function getMetrics(range: DateRange, scope: { storeIds: string[] }, productId?: string, opts: { previous?: boolean } = {}): Promise<MetricsReport> {
+  const ids = productId ? await productStores(productId, scope.storeIds) : scope.storeIds;
+  const [stores, storeCount] = await Promise.all([
+    db.store.findMany({ where: { id: { in: ids } }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { id: true, name: true, color: true, timezone: true } }),
+    db.store.count(),
   ]);
-  return { range, daily, totals: summarize(daily), previous: summarize(prevDaily) };
+  const withPrevious = opts.previous !== false;
+  const needRevenue = Boolean(productId) || storeCount > 1;
+  const [revNow, revPrev] = await Promise.all([
+    needRevenue ? storeRevenueByDay(range.from, range.to) : null,
+    needRevenue && withPrevious ? storeRevenueByDay(range.prevFrom, range.prevTo) : null,
+  ]);
+  const combined = !productId && stores.length > 1;
+  const [perStore, perStorePrev, unlinked, unlinkedPrev] = await Promise.all([
+    Promise.all(stores.map((s) => loadDaily(range.from, range.to, s, productId, revNow))),
+    withPrevious ? Promise.all(stores.map((s) => loadDaily(range.prevFrom, range.prevTo, s, productId, revPrev))) : Promise.resolve([] as DailyPoint[][]),
+    combined ? loadUnlinkedDaily(range.from, range.to, ids) : Promise.resolve(null),
+    combined && withPrevious ? loadUnlinkedDaily(range.prevFrom, range.prevTo, ids) : Promise.resolve(null),
+  ]);
+  const days = eachDay(range.from, range.to);
+  const prevDays = eachDay(range.prevFrom, range.prevTo);
+  const daily = perStore.length === 1 && !unlinked ? perStore[0] : mergeDaily([...perStore, ...(unlinked ? [unlinked] : [])], days);
+  const prevDaily = !withPrevious ? [] : perStorePrev.length === 1 && !unlinkedPrev ? perStorePrev[0] : mergeDaily([...perStorePrev, ...(unlinkedPrev ? [unlinkedPrev] : [])], prevDays);
+  return {
+    range,
+    daily,
+    totals: summarize(daily),
+    previous: summarize(prevDaily),
+    byStore: combined ? stores.map((s, i) => ({ id: s.id, name: s.name, color: s.color, totals: summarize(perStore[i]) })) : [],
+    unlinkedSpend: unlinked ? cents(unlinked.reduce((sum, d) => sum + d.adSpend, 0)) : 0,
+  };
+}
+
+/** Orders placed in the date range, each store's days in its own time zone. */
+async function orderWindows(range: DateRange, storeIds: string[]): Promise<Prisma.OrderWhereInput> {
+  const stores = await db.store.findMany({ where: { id: { in: storeIds } }, select: { id: true, timezone: true } });
+  if (stores.length === 0) return { id: "none" };
+  return {
+    OR: stores.map((s) => {
+      const tz = validTimezone(s.timezone);
+      return { storeId: s.id, createdAt: { gte: dayStart(range.from, tz), lt: dayEnd(range.to, tz) } };
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -427,9 +557,12 @@ export type CampaignRow = {
   frequency: number;
 };
 
-export async function getCampaignBreakdown(range: DateRange, productId?: string): Promise<CampaignRow[]> {
+/** Campaigns whose spend these stores see: their own, plus not-yet-linked ones in ad accounts they use. */
+const campaignsOf = (storeIds: string[]): Prisma.CampaignWhereInput => ({ OR: [{ storeId: { in: storeIds } }, unlinkedCampaigns(storeIds)] });
+
+export async function getCampaignBreakdown(range: DateRange, scope: { storeIds: string[] }, productId?: string): Promise<CampaignRow[]> {
   const rows = await db.adInsight.findMany({
-    where: { date: { gte: range.from, lte: endOfUtcDay(range.to) }, ...(productId ? { campaign: { productId } } : {}) },
+    where: { date: { gte: range.from, lte: endOfUtcDay(range.to) }, campaign: productId ? { productId } : campaignsOf(scope.storeIds) },
     include: { campaign: true },
   });
   const map = new Map<string, CampaignRow>();
@@ -469,20 +602,25 @@ export async function getCampaignBreakdown(range: DateRange, productId?: string)
   return out;
 }
 
-export async function getDataStatus() {
-  const [settings, orderCount, insightCount, lastSyncs] = await Promise.all([
-    db.settings.findUnique({ where: { id: "default" } }),
-    db.order.count(),
-    db.adInsight.count(),
+/** What is connected and synced for the stores in scope. */
+export async function getDataStatus(scope: { storeIds: string[] }) {
+  const ids = scope.storeIds;
+  const [stores, accounts, orderCount, insightCount, lastSyncs] = await Promise.all([
+    db.store.findMany({ where: { id: { in: ids } }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
+    db.adAccount.findMany({ where: { token: { not: null }, stores: { some: { storeId: { in: ids } } } }, select: { id: true } }),
+    db.order.count({ where: { storeId: { in: ids } } }),
+    db.adInsight.count({ where: { campaign: campaignsOf(ids) } }),
     db.syncLog.findMany({ orderBy: { startedAt: "desc" }, take: 10 }),
   ]);
   return {
-    settings,
+    stores,
+    /** Every store in scope reports in this currency (all stores are USD today). */
+    currency: stores[0]?.currency ?? "USD",
     orderCount,
     insightCount,
     lastSyncs,
-    shopifyConnected: Boolean(settings?.shopifyDomain && (settings?.shopifyClientSecret || settings?.shopifyToken)),
-    metaConnected: Boolean(settings?.metaAdAccountId && settings?.metaToken),
+    shopifyConnected: stores.some((s) => Boolean(s.shopifyDomain && (s.shopifyClientSecret || s.shopifyToken))),
+    metaConnected: accounts.length > 0,
   };
 }
 
@@ -493,10 +631,10 @@ export async function getDataStatus() {
 export type ProductOption = { id: string; title: string; units: number; campaigns: number };
 
 /** Products for the picker, most-sold first, with how many campaigns are linked to each. */
-export async function getProductOptions(): Promise<ProductOption[]> {
+export async function getProductOptions(scope: { storeIds: string[] }): Promise<ProductOption[]> {
   const [variants, sold, campaigns] = await Promise.all([
-    db.productVariant.findMany({ select: { id: true, productId: true, productTitle: true } }),
-    db.orderLineItem.groupBy({ by: ["variantId"], _sum: { quantity: true }, where: { variantId: { not: null } } }),
+    db.productVariant.findMany({ where: { storeId: { in: scope.storeIds } }, select: { id: true, productId: true, productTitle: true } }),
+    db.orderLineItem.groupBy({ by: ["variantId"], _sum: { quantity: true }, where: { variantId: { not: null }, order: { storeId: { in: scope.storeIds } } } }),
     db.campaign.groupBy({ by: ["productId"], _count: { _all: true }, where: { productId: { not: null } } }),
   ]);
   const unitsByVariant = new Map(sold.map((s) => [s.variantId, s._sum.quantity ?? 0]));
@@ -534,8 +672,16 @@ export type BundleRow = {
  * One row per bundle size and exact price paid (Buy 2 at $84.95 and Buy 2 at
  * $94.95 are separate rows). Cancelled orders are left out: nothing was sold.
  */
-export async function getBundleBreakdown(range: DateRange, productId: string): Promise<{ rows: BundleRow[]; cancelled: number }> {
-  const slices = await loadOrderSlices(dayStart(range.from, range.tz), dayEnd(range.to, range.tz), productId);
+export async function getBundleBreakdown(range: DateRange, scope: { storeIds: string[] }, productId: string): Promise<{ rows: BundleRow[]; cancelled: number }> {
+  const stores = await db.store.findMany({ where: { id: { in: await productStores(productId, scope.storeIds) } }, select: { id: true, timezone: true } });
+  const slices = (
+    await Promise.all(
+      stores.map((st) => {
+        const tz = validTimezone(st.timezone);
+        return loadOrderSlices(dayStart(range.from, tz), dayEnd(range.to, tz), st.id, productId);
+      }),
+    )
+  ).flat();
   const map = new Map<string, BundleRow>();
   let cancelled = 0;
   for (const o of slices) {
@@ -571,6 +717,8 @@ export type CampaignSummary = {
   name: string;
   status: string;
   productId: string | null;
+  /** The store its spend counts for; null = in a shared ad account and not linked yet. */
+  storeId: string | null;
   spend: number;
   purchases: number;
   purchaseValue: number;
@@ -579,12 +727,12 @@ export type CampaignSummary = {
 };
 
 /** Every campaign (including ones with no spend in the period), most spend first. */
-export async function getCampaignSummaries(range: DateRange): Promise<CampaignSummary[]> {
+export async function getCampaignSummaries(range: DateRange, scope: { storeIds: string[] }): Promise<CampaignSummary[]> {
   const [campaigns, sums] = await Promise.all([
-    db.campaign.findMany({ select: { id: true, name: true, status: true, productId: true } }),
+    db.campaign.findMany({ where: campaignsOf(scope.storeIds), select: { id: true, name: true, status: true, productId: true, storeId: true } }),
     db.adInsight.groupBy({
       by: ["campaignId"],
-      where: { date: { gte: range.from, lte: endOfUtcDay(range.to) } },
+      where: { date: { gte: range.from, lte: endOfUtcDay(range.to) }, campaign: campaignsOf(scope.storeIds) },
       _sum: { spend: true, purchases: true, purchaseValue: true },
     }),
   ]);
@@ -620,17 +768,15 @@ export type ProductSummary = {
  * exact same numbers its product page shows. Free gifts and $0 bonuses are not
  * listed: their cost is already inside the product they ship with.
  */
-export async function getProductSummaries(range: DateRange): Promise<{ products: ProductSummary[]; unlinkedSpend: number }> {
-  const start = dayStart(range.from, range.tz);
-  const end = dayEnd(range.to, range.tz);
+export async function getProductSummaries(range: DateRange, scope: { storeIds: string[] }): Promise<{ products: ProductSummary[]; unlinkedSpend: number }> {
   const [paidLines, campaigns, variants] = await Promise.all([
     db.orderLineItem.findMany({
-      where: { price: { gt: 0 }, order: { createdAt: { gte: start, lt: end } }, variant: { productId: { not: null } } },
+      where: { price: { gt: 0 }, order: await orderWindows(range, scope.storeIds), variant: { productId: { not: null } } },
       select: { variant: { select: { productId: true } } },
       distinct: ["variantId"],
     }),
-    getCampaignSummaries(range),
-    db.productVariant.findMany({ select: { productId: true, productTitle: true, imageUrl: true }, orderBy: { shopifyId: "asc" } }),
+    getCampaignSummaries(range, scope),
+    db.productVariant.findMany({ where: { storeId: { in: scope.storeIds } }, select: { productId: true, productTitle: true, imageUrl: true }, orderBy: { shopifyId: "asc" } }),
   ]);
   const ids = new Set<string>();
   for (const l of paidLines) if (l.variant?.productId) ids.add(l.variant.productId);
@@ -647,7 +793,7 @@ export async function getProductSummaries(range: DateRange): Promise<{ products:
 
   const products = await Promise.all(
     [...ids].filter((id) => info.has(id)).map(async (id) => {
-      const { totals: t } = await getMetrics(range, id, { previous: false });
+      const { totals: t } = await getMetrics(range, scope, id, { previous: false });
       return {
         id,
         title: info.get(id)!.title,
@@ -670,6 +816,7 @@ export async function getProductSummaries(range: DateRange): Promise<{ products:
 
 export type OrderRow = {
   id: string;
+  storeId: string | null;
   name: string;
   createdAt: Date;
   country: string | null;
@@ -684,9 +831,9 @@ export type OrderRow = {
 };
 
 /** Orders placed in the period, newest first, with each order's own profit. */
-export async function getOrderRows(range: DateRange, limit = 500): Promise<OrderRow[]> {
+export async function getOrderRows(range: DateRange, scope: { storeIds: string[] }, limit = 500): Promise<OrderRow[]> {
   const orders = await db.order.findMany({
-    where: { createdAt: { gte: dayStart(range.from, range.tz), lt: dayEnd(range.to, range.tz) } },
+    where: await orderWindows(range, scope.storeIds),
     orderBy: { createdAt: "desc" },
     take: limit,
     include: { lineItems: { select: { title: true, quantity: true, price: true } } },
@@ -697,6 +844,7 @@ export async function getOrderRows(range: DateRange, limit = 500): Promise<Order
     const shippingCost = cents(o.shippingCost + o.handlingCost);
     return {
       id: o.id,
+      storeId: o.storeId,
       name: o.name,
       createdAt: o.createdAt,
       country: o.country,

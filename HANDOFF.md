@@ -5,11 +5,33 @@ owner's expectations as of the last session.
 
 ## WHERE WE LEFT OFF (latest session, Oct 19, 2026) — read this first
 
+Oct 20 (later): **Multi-store** built on `claude/eager-cray-sncji0`, tested, NOT deployed yet (waiting
+for the owner's go-ahead). Owner's answers: each store has its own Shopify and its own support inbox;
+ad accounts are sometimes shared, sometimes not; members see only the stores the owner picks; all USD;
+expenses per store or "Shared" (split by each store's revenue that day); the app opens on the last store
+viewed (cookie `pd_store`), "All stores" the first time. Design:
+- `Store` holds everything that was on Settings per store (Shopify, support mailbox + lock, fee
+  assumptions, tz, currency, `supportAbout` line for the AI). `AdAccount` + `StoreAdAccount` (shared
+  accounts), `UserStore` (access; owner sees all), `Invite.storeIds`. storeId on ProductVariant, Order,
+  Campaign (derived: linked product's store, else the account's only store, else null = "not linked to a
+  store"), CustomCost (null = shared), SupportThread/Message, KbArticle (unique storeId+key), Task (optional).
+- One-time move `ensureStores()` (src/lib/stores.ts): copies Settings into the first store, Meta into an
+  AdAccount, members get access, backfills storeId. Verified on a copy shaped like production: every
+  number identical before/after (store CSVs 7/30/90 days, all 8 products, every page's figures).
+  Old Settings columns are kept (nothing dropped); `getSettingsRow()` no longer exposes them.
+- Metrics: each store in its own time zone, "All stores" = sum of stores + unlinked shared-account spend,
+  "By store" table on the Dashboard. Verified All = LearnWell + Brightway to the cent, shared expense
+  split exactly, unlinked spend counted once.
+- Support, knowledge base, AI prompt, sender name per store; a new store's topics start with automatic
+  replies OFF (LearnWell policies are only a template). Cron /api/cron/support loops over stores.
+- Settings: stores list, Add a store (owner), per-store Shopify/support/details, Meta ad accounts with
+  store tick-boxes. Expenses per store/shared. Team: store tick-boxes per member and on invites.
+
 Oct 20: **Rebrand to "Margin" + look C** (lavender ground, white rounded cards, violet #6D4AFF +
 teal profit, Plus Jakarta Sans, floating sidebar, phone bottom tab bar, filled Net profit card,
 greeting on Dashboard), chosen by the owner from design drafts
 (https://claude.ai/artifact/UEUFkWzUgH29KurxSfzroW). Built on `claude/eager-cray-sncji0`, tested
-locally (desktop, phone, dark mode, every page); waiting for go-ahead to deploy. Next after that:
+locally (desktop, phone, dark mode, every page); owner approved and it was DEPLOYED. Next after that:
 **multi-store** (store switcher, "All stores" view). Waiting on owner: does each store have its own
 Shopify + Meta account, own support inbox, which team members see which stores, currencies.
 Known, pre-existing: an intermittent React hydration error #418 on /orders (also on the live

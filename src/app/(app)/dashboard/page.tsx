@@ -9,24 +9,27 @@ import { DateRangePicker } from "@/components/DateRangePicker";
 import { ProfitOverview } from "@/components/ProfitOverview";
 import { DataBanner } from "@/components/DataBanner";
 import { EmptyState } from "@/components/EmptyState";
+import { StoreBreakdown } from "@/components/StoreBreakdown";
 
 type Search = { range?: string; from?: string; to?: string; denied?: string };
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const { range } = await getScope(sp);
-  const [report, status] = await Promise.all([getMetrics(range), getDataStatus()]);
-  const currency = status.settings?.currency ?? "USD";
+  const scope = await getScope(user, sp);
+  const { range } = scope;
+  const [report, status] = await Promise.all([getMetrics(range, scope), getDataStatus(scope)]);
+  const currency = status.currency;
   const hasData = status.orderCount > 0 || status.insightCount > 0;
-  const hour = hourIn(new Date(), validTimezone(user.timeZone ?? status.settings?.timezone));
+  const hour = hourIn(new Date(), validTimezone(user.timeZone ?? range.tz));
+  const who = scope.stores.store ? scope.stores.store.name : scope.stores.stores.length > 1 ? "your stores" : "your store";
   const greeting = `Good ${hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}, ${user.name.trim().split(/\s+/)[0]}`;
 
   return (
     <div>
-      <PageHeader title={greeting} description={`Here's how ${status.settings?.storeName ?? "your store"} did · ${range.label}`}>
+      <PageHeader title={greeting} description={`Here's how ${who} did · ${range.label}`}>
         <DateRangePicker range={range} />
-        <Link href={`/api/export/daily?${scopeQuery(range)}`} className="btn-ghost" prefetch={false} title="Download day-by-day numbers as CSV">
+        <Link href={`/api/export/daily?${scopeQuery(range)}${scope.stores.store ? `&store=${scope.stores.store.id}` : ""}`} className="btn-ghost" prefetch={false} title="Download day-by-day numbers as CSV">
           <Download className="h-4 w-4" />
         </Link>
       </PageHeader>
@@ -37,7 +40,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       {!hasData ? (
         <EmptyState title="No data yet" description="Connect Shopify and Meta Ads in Settings and run a sync." actionHref="/settings" actionLabel="Go to settings" />
       ) : (
-        <ProfitOverview report={report} currency={currency} adNote={status.metaConnected ? "No ad spend" : "Meta not connected"} />
+        <>
+          <ProfitOverview report={report} currency={currency} adNote={status.metaConnected ? "No ad spend" : "Meta not connected"} />
+          <StoreBreakdown stores={report.byStore} unlinkedSpend={report.unlinkedSpend} currency={currency} />
+        </>
       )}
     </div>
   );

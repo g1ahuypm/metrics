@@ -28,6 +28,7 @@ export type TaskFormValues = {
   dueTime: string;
   priority: string;
   link: string;
+  storeId: string;
 };
 
 const PRIORITY_STYLE: Record<string, string> = {
@@ -41,7 +42,19 @@ function zoneName(tz: string): string {
 }
 
 /** Create or edit a task. Every field that makes a task specific is required. */
-export function TaskForm({ members, values, today, myTimeZone }: { members: Member[]; values: TaskFormValues; today: string; myTimeZone: string }) {
+export function TaskForm({
+  members,
+  values,
+  today,
+  myTimeZone,
+  stores,
+}: {
+  members: Member[];
+  values: TaskFormValues;
+  today: string;
+  myTimeZone: string;
+  stores: { id: string; name: string }[];
+}) {
   const [state, action] = useActionState(saveTaskAction, undefined);
   const [assigneeId, setAssigneeId] = useState(values.assigneeId);
   const assignee = members.find((m) => m.id === assigneeId);
@@ -109,6 +122,19 @@ export function TaskForm({ members, values, today, myTimeZone }: { members: Memb
             : "No time means by the end of that day."}
         </p>
       </div>
+
+      {stores.length > 1 && (
+        <div>
+          <label className="label" htmlFor="storeId">Store <span className="font-normal text-ink-3">(optional)</span></label>
+          <select id="storeId" name="storeId" className="input" defaultValue={values.storeId}>
+            <option value="">Not about one store</option>
+            {stores.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      {stores.length <= 1 && <input type="hidden" name="storeId" value={values.storeId} />}
 
       <div>
         <label className="label" htmlFor="link">Link <span className="font-normal text-ink-3">(optional)</span></label>

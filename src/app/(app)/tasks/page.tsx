@@ -34,7 +34,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
       where,
       orderBy: tab.key === "done" ? { doneAt: "desc" } : [{ dueAt: "asc" }],
       take: tab.key === "done" ? 100 : 500,
-      include: { assignee: { select: { name: true } }, _count: { select: { updates: { where: { kind: "comment" } } } } },
+      include: { assignee: { select: { name: true } }, store: { select: { name: true, color: true } }, _count: { select: { updates: { where: { kind: "comment" } } } } },
     }),
     Promise.all(
       tabs.map((t) =>
@@ -69,6 +69,12 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
             {showAssignee && exactDate && <span aria-hidden>·</span>}
             {exactDate && <span>Due {fmtDue(t.dueDate, t.dueTime)}</span>}
             {t.status === "open" && <PriorityBadge priority={t.priority} />}
+            {t.store && (
+              <span className="badge">
+                <span className="h-1.5 w-1.5 rounded-full" style={{ background: t.store.color }} aria-hidden="true" />
+                {t.store.name}
+              </span>
+            )}
             {t.extensionDate && t.status === "open" && (
               <span className="badge border-warn/40 bg-warn/10 text-warn-text">
                 <Clock className="h-3 w-3" /> Asked for more time

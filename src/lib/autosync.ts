@@ -11,19 +11,15 @@ const RUNNING_MS = 10 * 60 * 1000; // treat a "running" log newer than this as s
  * last sync is stale, a sync runs in the background after the page is served.
  */
 export async function maybeAutoSync(): Promise<void> {
-  const s = await db.settings.findUnique({
-    where: { id: "default" },
-    select: { shopifyDomain: true, shopifyToken: true, shopifyClientId: true, metaAdAccountId: true, metaToken: true, lastShopifySyncAt: true, lastMetaSyncAt: true },
-  });
-  if (!s) return;
-  const shopify = Boolean(s.shopifyDomain && (s.shopifyToken || s.shopifyClientId));
-  const meta = Boolean(s.metaAdAccountId && s.metaToken);
-  if (!shopify && !meta) return;
+  const [stores, accounts] = await Promise.all([
+    db.store.findMany({ where: { shopifyDomain: { not: null } }, select: { lastShopifySyncAt: true } }),
+    db.adAccount.findMany({ where: { token: { not: null } }, select: { lastSyncAt: true } }),
+  ]);
+  if (stores.length === 0 && accounts.length === 0) return;
 
   const now = Date.now();
-  const stale =
-    (shopify && (!s.lastShopifySyncAt || now - s.lastShopifySyncAt.getTime() > STALE_MS)) ||
-    (meta && (!s.lastMetaSyncAt || now - s.lastMetaSyncAt.getTime() > STALE_MS));
+  const old = (d: Date | null) => !d || now - d.getTime() > STALE_MS;
+  const stale = stores.some((s) => old(s.lastShopifySyncAt)) || accounts.some((a) => old(a.lastSyncAt));
   if (!stale) return;
 
   const running = await db.syncLog.findFirst({ where: { status: "running", startedAt: { gte: new Date(now - RUNNING_MS) } } });
@@ -41,21 +37,24 @@ export async function maybeAutoSync(): Promise<void> {
 const SUPPORT_STALE_MS = 2 * 60 * 1000;
 
 /** Opening the Support inbox checks for new mail when the last check is over two minutes old. */
-export async function maybeCheckSupport(): Promise<void> {
-  const s = await db.settings.findUnique({
-    where: { id: "default" },
-    select: { supportEmail: true, supportAppPassword: true, lastSupportSyncAt: true, supportLockUntil: true },
-  });
-  if (!s?.supportEmail || !s.supportAppPassword) return;
+export async function maybeCheckSupport(storeIds?: string[]): Promise<void> {
   const now = Date.now();
-  if (s.lastSupportSyncAt && now - s.lastSupportSyncAt.getTime() < SUPPORT_STALE_MS) return;
-  if (s.supportLockUntil && s.supportLockUntil.getTime() > now) return;
+  const stores = await db.store.findMany({
+    where: { supportEmail: { not: null }, supportAppPassword: { not: null }, ...(storeIds ? { id: { in: storeIds } } : {}) },
+    select: { id: true, lastSupportSyncAt: true, supportLockUntil: true },
+  });
+  const due = stores.filter(
+    (s) => !(s.lastSupportSyncAt && now - s.lastSupportSyncAt.getTime() < SUPPORT_STALE_MS) && !(s.supportLockUntil && s.supportLockUntil.getTime() > now),
+  );
+  if (due.length === 0) return;
   after(async () => {
-    try {
-      const { runSupport } = await import("./support/run");
-      await runSupport();
-    } catch (err) {
-      console.error("support check failed", err);
+    const { runSupport } = await import("./support/run");
+    for (const s of due) {
+      try {
+        await runSupport(s.id);
+      } catch (err) {
+        console.error("support check failed", err);
+      }
     }
   });
 }

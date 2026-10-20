@@ -4,6 +4,8 @@ import { ArrowLeft, Download, Gift } from "lucide-react";
 import { canEdit, requireUser } from "@/lib/auth";
 import { scopeQuery } from "@/lib/dates";
 import { getScope } from "@/lib/scope";
+import { db } from "@/lib/db";
+import { allowedStores } from "@/lib/stores";
 import { productIdFromParam } from "@/lib/links";
 import { fmtMoney, fmtNumber, safeDiv } from "@/lib/format";
 import { getBundleBreakdown, getCampaignSummaries, getDataStatus, getMetrics, getProductOptions } from "@/lib/metrics";
@@ -24,18 +26,24 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
   const editor = canEdit(user.role);
   const productId = productIdFromParam((await params).id);
   if (!productId) notFound();
-  const { range } = await getScope(await searchParams);
+  // A product page always shows the product's own store (in its time zone), whatever the switcher says.
+  const allowed = (await allowedStores(user)).map((s) => s.id);
+  const home = await db.productVariant.findFirst({ where: { productId, storeId: { in: allowed } }, select: { storeId: true } });
+  if (!home?.storeId) notFound();
+  const scope = await getScope(user, { ...(await searchParams), store: home.storeId });
+  const { range } = scope;
+  const own = { storeIds: [home.storeId] };
 
   const [[costs], options, status, report, bundles, campaigns] = await Promise.all([
-    getProductCostData(productId),
-    getProductOptions(),
-    getDataStatus(),
-    getMetrics(range, productId),
-    getBundleBreakdown(range, productId),
-    getCampaignSummaries(range),
+    getProductCostData(productId, own.storeIds),
+    getProductOptions(own),
+    getDataStatus(own),
+    getMetrics(range, own, productId),
+    getBundleBreakdown(range, own, productId),
+    getCampaignSummaries(range, own),
   ]);
   if (!costs) notFound();
-  const currency = status.settings?.currency ?? "USD";
+  const currency = status.currency;
   const hasData = status.orderCount > 0 || status.insightCount > 0;
   const linkedCount = campaigns.filter((c) => c.productId === productId).length;
   const missing = costCoverage(costs).missing;
@@ -63,7 +71,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
         <div className="flex flex-wrap items-center gap-2">
           <ProductSwitcher products={switcher} value={productId} />
           <DateRangePicker range={range} />
-          <Link href={`/api/export/daily?${scopeQuery(range, productId)}`} className="btn-ghost" prefetch={false} title="Download day-by-day numbers as CSV">
+          <Link href={`/api/export/daily?${scopeQuery(range, productId)}&store=${home.storeId}`} className="btn-ghost" prefetch={false} title="Download day-by-day numbers as CSV">
             <Download className="h-4 w-4" />
           </Link>
         </div>

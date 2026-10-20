@@ -107,12 +107,43 @@ Do not quote a price or a discount that isn't stated here.`,
   },
 ];
 
-/** Adds the starting articles the first time support is used. Never overwrites edits. */
-export async function ensureKnowledgeBase(): Promise<void> {
-  if ((await db.kbArticle.count()) > 0) return;
-  await db.kbArticle.createMany({ data: DEFAULT_ARTICLES.map((a, i) => ({ ...a, sortOrder: i })), skipDuplicates: true });
+/**
+ * Adds the starting articles the first time a store's support is used. Never overwrites edits.
+ * LearnWell's policies are only a template for other stores, so there every topic starts
+ * with automatic replies off until the owner has checked the facts.
+ */
+export async function ensureKnowledgeBase(storeId: string): Promise<void> {
+  if ((await db.kbArticle.count({ where: { storeId } })) > 0) return;
+  const store = await db.store.findUniqueOrThrow({ where: { id: storeId }, select: { sortOrder: true } });
+  const original = store.sortOrder === 0 && (await db.store.count({ where: { sortOrder: 0 } })) === 1;
+  await db.kbArticle.createMany({
+    data: DEFAULT_ARTICLES.map((a, i) => {
+      if (original) return { ...a, storeId, sortOrder: i };
+      const generic = a.key === "offer" ? GENERIC_OFFER : a.key === "product_question" ? GENERIC_PRODUCT : null;
+      return { ...a, ...generic, storeId, sortOrder: i, autoSend: false };
+    }),
+    skipDuplicates: true,
+  });
 }
 
+const GENERIC_OFFER = {
+  title: "The offer and bundles",
+  whenToUse: "Questions about prices, bundles, discounts or free gifts.",
+  answer: "Owner: describe this store's offer here (bundles, free gifts, how discounts apply). Until then a person answers these.",
+};
+
+const GENERIC_PRODUCT = {
+  title: "Questions about a product",
+  whenToUse: "Questions about a product's contents, format, size, age range or suitability.",
+  answer: "Owner: add the facts customers ask about here. Until then a person answers these.",
+};
+
+/** The sign-off when a store has none of its own. */
+export function defaultSignature(storeName: string): string {
+  return `Warm regards,\n\nThe ${storeName} Customer Care Team`;
+}
+
+/** LearnWell's original sign-off (the first store keeps it). */
 export const DEFAULT_SIGNATURE = `Warm regards,
 
 The LearnWell Customer Care Team

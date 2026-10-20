@@ -1,18 +1,20 @@
 import "server-only";
+import type { Store } from "@prisma/client";
 import { db } from "../db";
 import { decrypt } from "../crypto";
 
 /** Either a static legacy token or client credentials (token fetched on demand). */
 export type ShopifyAuth =
-  | { domain: string; kind: "static"; token: string }
-  | { domain: string; kind: "client"; clientId: string; clientSecret: string };
+  | { storeId: string; domain: string; kind: "static"; token: string }
+  | { storeId: string; domain: string; kind: "client"; clientId: string; clientSecret: string };
 
-export type IntegrationConfig = {
+/** One store's connection and cost assumptions, secrets decrypted. */
+export type StoreConfig = {
+  storeId: string;
   storeName: string;
   currency: string;
   timezone: string;
   shopify: ShopifyAuth | null;
-  meta: { adAccountId: string; token: string } | null;
   paymentFeePercent: number;
   paymentFeeFixed: number;
   platformFeePercent: number;
@@ -20,37 +22,42 @@ export type IntegrationConfig = {
   defaultHandlingCost: number;
   defaultCogsPercent: number;
   lastShopifySyncAt: Date | null;
-  lastMetaSyncAt: Date | null;
 };
 
+/** One Meta ad account, token decrypted. */
+export type AdAccountConfig = { id: string; adAccountId: string; token: string; lastSyncAt: Date | null };
+
+/**
+ * App-wide settings (notification keys, scheduler bookkeeping). Everything about a
+ * store lives on Store; the old single-store columns are only read by the one-time move.
+ */
 export async function getSettingsRow() {
   return db.settings.upsert({
     where: { id: "default" },
     update: {},
     create: { id: "default" },
+    select: { id: true, vapidPublicKey: true, vapidPrivateKey: true, lastTaskReminderAt: true, storesMigratedAt: true },
   });
 }
 
-/** Settings row merged with environment fallbacks and decrypted tokens. */
-export async function getIntegrationConfig(): Promise<IntegrationConfig> {
-  const s = await getSettingsRow();
+/** The full original row, for copying the single-store setup into the first store. */
+export async function getLegacySettings() {
+  return db.settings.upsert({ where: { id: "default" }, update: {}, create: { id: "default" } });
+}
 
-  const shopifyDomain = normalizeDomain(s.shopifyDomain || process.env.SHOPIFY_STORE_DOMAIN || "");
-  const clientId = s.shopifyClientId || process.env.SHOPIFY_CLIENT_ID || "";
-  const clientSecret = decrypt(s.shopifyClientSecret) || process.env.SHOPIFY_CLIENT_SECRET || "";
-  const staticToken = s.shopifyTokenExpires ? "" : decrypt(s.shopifyToken) || process.env.SHOPIFY_ACCESS_TOKEN || "";
+export function storeConfig(s: Store): StoreConfig {
+  const domain = normalizeDomain(s.shopifyDomain ?? "");
+  const clientSecret = decrypt(s.shopifyClientSecret) ?? "";
+  const staticToken = s.shopifyTokenExpires ? "" : decrypt(s.shopifyToken) ?? "";
   let shopify: ShopifyAuth | null = null;
-  if (shopifyDomain && clientId && clientSecret) shopify = { domain: shopifyDomain, kind: "client", clientId, clientSecret };
-  else if (shopifyDomain && staticToken) shopify = { domain: shopifyDomain, kind: "static", token: staticToken };
-  const metaAccount = s.metaAdAccountId || process.env.META_AD_ACCOUNT_ID || "";
-  const metaToken = decrypt(s.metaToken) || process.env.META_ACCESS_TOKEN || "";
-
+  if (domain && s.shopifyClientId && clientSecret) shopify = { storeId: s.id, domain, kind: "client", clientId: s.shopifyClientId, clientSecret };
+  else if (domain && staticToken) shopify = { storeId: s.id, domain, kind: "static", token: staticToken };
   return {
-    storeName: s.storeName,
+    storeId: s.id,
+    storeName: s.name,
     currency: s.currency,
     timezone: s.timezone,
     shopify,
-    meta: metaAccount && metaToken ? { adAccountId: normalizeAdAccount(metaAccount), token: metaToken } : null,
     paymentFeePercent: s.paymentFeePercent,
     paymentFeeFixed: s.paymentFeeFixed,
     platformFeePercent: s.platformFeePercent,
@@ -58,8 +65,18 @@ export async function getIntegrationConfig(): Promise<IntegrationConfig> {
     defaultHandlingCost: s.defaultHandlingCost,
     defaultCogsPercent: s.defaultCogsPercent,
     lastShopifySyncAt: s.lastShopifySyncAt,
-    lastMetaSyncAt: s.lastMetaSyncAt,
   };
+}
+
+export async function getStoreConfig(storeId: string): Promise<StoreConfig> {
+  return storeConfig(await db.store.findUniqueOrThrow({ where: { id: storeId } }));
+}
+
+export async function getAdAccountConfigs(): Promise<AdAccountConfig[]> {
+  const rows = await db.adAccount.findMany({ orderBy: { createdAt: "asc" } });
+  return rows
+    .map((a) => ({ id: a.id, adAccountId: normalizeAdAccount(a.metaAccountId), token: decrypt(a.token) ?? "", lastSyncAt: a.lastSyncAt }))
+    .filter((a) => a.token);
 }
 
 export function normalizeDomain(domain: string): string {

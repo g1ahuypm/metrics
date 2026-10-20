@@ -5,8 +5,10 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "../db";
 import { canManageTasks, requireSignedIn, type SessionUser } from "../auth";
+import { canSeeStore } from "../stores";
 import { getSettingsRow } from "../integrations/config";
 import { validTimezone } from "../scope";
+import { firstStoreTimezone } from "../stores";
 import { notify, type NewNotification } from "../notify";
 import { dueInstant, fmtDue, PRIORITIES } from "../tasks/due";
 import type { FormState } from "./auth";
@@ -23,6 +25,7 @@ const taskForm = z.object({
   dueTime: z.union([z.literal(""), z.string().regex(TIME, "Enter a time like 17:00")]),
   priority: z.enum(PRIORITIES.map((p) => p.key) as [string, ...string[]]),
   link: z.string().trim().max(500),
+  storeId: z.string(),
 });
 
 function normalizeLink(raw: string): string | null | undefined {
@@ -41,7 +44,7 @@ function normalizeLink(raw: string): string | null | undefined {
 async function zoneFor(userTz: string | null, me: SessionUser): Promise<string> {
   if (userTz) return validTimezone(userTz);
   if (me.timeZone) return validTimezone(me.timeZone);
-  return validTimezone((await getSettingsRow()).timezone);
+  return validTimezone(await firstStoreTimezone());
 }
 
 /** Owner and admins see every task; others only the tasks given to them or created by them. */
@@ -77,11 +80,14 @@ export async function saveTaskAction(_prev: FormState, formData: FormData): Prom
     dueTime: formData.get("dueTime") ?? "",
     priority: formData.get("priority") ?? "normal",
     link: formData.get("link") ?? "",
+    storeId: formData.get("storeId") ?? "",
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   const f = parsed.data;
   const link = normalizeLink(f.link);
   if (link === undefined) return { error: "The link doesn't look like a web address" };
+  const storeId = f.storeId || null;
+  if (storeId && !(await canSeeStore(me, storeId))) return { error: "Pick one of your stores" };
 
   const assignee = await db.user.findUnique({ where: { id: f.assigneeId }, select: { id: true, name: true, timeZone: true } });
   if (!assignee) return { error: "That team member no longer exists" };
@@ -104,6 +110,7 @@ export async function saveTaskAction(_prev: FormState, formData: FormData): Prom
         dueTimeZone: tz,
         dueAt,
         link,
+        storeId,
         assigneeId: assignee.id,
         createdById: me.id,
         updates: { create: { userId: me.id, kind: "created", text: `Assigned to ${assignee.name}, due ${due}` } },
@@ -121,7 +128,8 @@ export async function saveTaskAction(_prev: FormState, formData: FormData): Prom
   const dueChanged = old.dueDate !== f.dueDate || old.dueTime !== dueTime || old.assigneeId !== assignee.id;
   if (dueChanged && old.status === "open" && dueAt <= new Date()) return { error: "That due date has already passed" };
   const reassigned = old.assigneeId !== assignee.id;
-  const edited = old.title !== f.title || old.details !== f.details || old.doneMeans !== f.doneMeans || old.priority !== f.priority || old.link !== link;
+  const edited =
+    old.title !== f.title || old.details !== f.details || old.doneMeans !== f.doneMeans || old.priority !== f.priority || old.link !== link || old.storeId !== storeId;
   if (!dueChanged && !edited) redirect(`/tasks/${id}`);
 
   const log: { kind: string; text: string }[] = [];
@@ -141,6 +149,7 @@ export async function saveTaskAction(_prev: FormState, formData: FormData): Prom
       dueTimeZone: tz,
       dueAt,
       link,
+      storeId,
       assigneeId: assignee.id,
       // A new due date answers any pending request for more time.
       ...(dueChanged ? { extensionDate: null, extensionTime: null, extensionReason: null } : {}),

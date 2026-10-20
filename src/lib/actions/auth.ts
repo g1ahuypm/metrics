@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "../db";
+import { ensureStores } from "../stores";
 import { createSession, destroySession, hasAnyUsers, hashPassword, verifyPassword } from "../auth";
 
 export type FormState = { error?: string; success?: string } | undefined;
@@ -57,6 +58,9 @@ export async function registerOwnerAction(_prev: FormState, formData: FormData):
     update: { storeName: parsed.data.storeName },
     create: { id: "default", storeName: parsed.data.storeName },
   });
+  // The first store is created from these settings; name it after what the owner typed.
+  await ensureStores();
+  await db.store.updateMany({ where: { sortOrder: 0 }, data: { name: parsed.data.storeName } });
   await createSession(user.id);
   redirect("/settings?welcome=1");
 }
@@ -89,6 +93,9 @@ export async function acceptInviteAction(_prev: FormState, formData: FormData): 
     },
   });
   await db.invite.update({ where: { id: invite.id }, data: { acceptedAt: new Date() } });
+  // The stores the invite was for (only ones that still exist).
+  const stores = await db.store.findMany({ where: { id: { in: invite.storeIds } }, select: { id: true } });
+  if (stores.length) await db.userStore.createMany({ data: stores.map((st) => ({ userId: user.id, storeId: st.id })), skipDuplicates: true });
   await createSession(user.id);
   redirect("/dashboard");
 }

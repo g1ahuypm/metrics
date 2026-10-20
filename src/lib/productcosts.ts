@@ -7,12 +7,13 @@ import type { ProductCostData } from "@/components/costs/ProductCostEditor";
  * country, units sold per country and per variant, bundle sizes bought, and
  * whether the product is a free gift. Pass a productId to load just that one.
  */
-export async function getProductCostData(only?: string): Promise<ProductCostData[]> {
+export async function getProductCostData(only?: string, storeIds?: string[]): Promise<ProductCostData[]> {
+  const inStores = storeIds ? { storeId: { in: storeIds } } : {};
   const [variants, tiers, sold] = await Promise.all([
-    db.productVariant.findMany({ where: only ? { productId: only } : {}, orderBy: [{ productTitle: "asc" }, { variantTitle: "asc" }] }),
+    db.productVariant.findMany({ where: { ...inStores, ...(only ? { productId: only } : {}) }, orderBy: [{ productTitle: "asc" }, { variantTitle: "asc" }] }),
     db.costTier.findMany({ where: only ? { productId: only } : {}, orderBy: { quantity: "asc" } }),
     db.orderLineItem.findMany({
-      where: { variantId: { not: null }, order: { cancelledAt: null }, ...(only ? { variant: { productId: only } } : {}) },
+      where: { variantId: { not: null }, order: { cancelledAt: null, ...inStores }, ...(only ? { variant: { productId: only } } : {}) },
       select: { orderId: true, variantId: true, quantity: true, price: true, order: { select: { country: true } } },
     }),
   ]);

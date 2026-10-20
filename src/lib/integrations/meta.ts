@@ -2,7 +2,8 @@ import "server-only";
 import { subDays } from "date-fns";
 import { db } from "../db";
 import { toISODate, todayUtc } from "../dates";
-import type { IntegrationConfig } from "./config";
+import { recomputeCampaignStores } from "../stores";
+import type { AdAccountConfig } from "./config";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
 
@@ -70,11 +71,10 @@ export async function testMeta(cfg: { adAccountId: string; token: string }): Pro
   return `${acc.name} (${acc.currency})`;
 }
 
-export async function syncMetaCampaigns(cfg: IntegrationConfig): Promise<Map<string, string>> {
-  if (!cfg.meta) throw new Error("Meta Ads is not connected");
+export async function syncMetaCampaigns(cfg: AdAccountConfig): Promise<Map<string, string>> {
   const url =
-    `${GRAPH}/${cfg.meta.adAccountId}/campaigns?fields=id,name,status,effective_status,objective,daily_budget` +
-    `&limit=200&access_token=${encodeURIComponent(cfg.meta.token)}`;
+    `${GRAPH}/${cfg.adAccountId}/campaigns?fields=id,name,status,effective_status,objective,daily_budget` +
+    `&limit=200&access_token=${encodeURIComponent(cfg.token)}`;
   const campaigns = await metaPaged<MetaCampaign>(url);
   const ids = new Map<string, string>();
   for (const c of campaigns) {
@@ -82,12 +82,14 @@ export async function syncMetaCampaigns(cfg: IntegrationConfig): Promise<Map<str
       where: { metaId: c.id },
       create: {
         metaId: c.id,
+        adAccountId: cfg.id,
         name: c.name,
         status: c.effective_status ?? c.status,
         objective: c.objective ?? null,
         dailyBudget: c.daily_budget ? Number(c.daily_budget) / 100 : null,
       },
       update: {
+        adAccountId: cfg.id,
         name: c.name,
         status: c.effective_status ?? c.status,
         objective: c.objective ?? null,
@@ -99,14 +101,13 @@ export async function syncMetaCampaigns(cfg: IntegrationConfig): Promise<Map<str
   return ids;
 }
 
-export async function syncMetaInsights(cfg: IntegrationConfig, since: Date, campaignIds: Map<string, string>): Promise<number> {
-  if (!cfg.meta) throw new Error("Meta Ads is not connected");
+export async function syncMetaInsights(cfg: AdAccountConfig, since: Date, campaignIds: Map<string, string>): Promise<number> {
   const timeRange = JSON.stringify({ since: toISODate(since), until: toISODate(todayUtc()) });
   const url =
-    `${GRAPH}/${cfg.meta.adAccountId}/insights?level=campaign` +
+    `${GRAPH}/${cfg.adAccountId}/insights?level=campaign` +
     `&fields=campaign_id,campaign_name,spend,impressions,reach,inline_link_clicks,actions,action_values` +
     `&time_increment=1&time_range=${encodeURIComponent(timeRange)}&limit=500` +
-    `&access_token=${encodeURIComponent(cfg.meta.token)}`;
+    `&access_token=${encodeURIComponent(cfg.token)}`;
   const rows = await metaPaged<MetaInsight>(url);
 
   let count = 0;
@@ -116,7 +117,7 @@ export async function syncMetaInsights(cfg: IntegrationConfig, since: Date, camp
       // Campaign may have been deleted/archived but still has history.
       const c = await db.campaign.upsert({
         where: { metaId: r.campaign_id },
-        create: { metaId: r.campaign_id, name: r.campaign_name, status: "ARCHIVED" },
+        create: { metaId: r.campaign_id, adAccountId: cfg.id, name: r.campaign_name, status: "ARCHIVED" },
         update: {},
       });
       campaignId = c.id;
@@ -143,12 +144,13 @@ export async function syncMetaInsights(cfg: IntegrationConfig, since: Date, camp
   return count;
 }
 
-export async function syncMeta(cfg: IntegrationConfig): Promise<{ campaigns: number; insights: number }> {
+export async function syncMeta(cfg: AdAccountConfig): Promise<{ campaigns: number; insights: number }> {
   const ids = await syncMetaCampaigns(cfg);
   // Meta restates the last few days as attribution windows close, so always
   // re-pull a trailing week. Pull 90 days on the first run.
-  const since = cfg.lastMetaSyncAt ? subDays(cfg.lastMetaSyncAt, 7) : subDays(new Date(), 90);
+  const since = cfg.lastSyncAt ? subDays(cfg.lastSyncAt, 7) : subDays(new Date(), 90);
   const insights = await syncMetaInsights(cfg, since, ids);
-  await db.settings.update({ where: { id: "default" }, data: { lastMetaSyncAt: new Date() } });
+  await recomputeCampaignStores();
+  await db.adAccount.update({ where: { id: cfg.id }, data: { lastSyncAt: new Date() } });
   return { campaigns: ids.size, insights };
 }

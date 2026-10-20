@@ -1,5 +1,5 @@
 import "server-only";
-import { getIntegrationConfig } from "../integrations/config";
+import { getStoreConfig } from "../integrations/config";
 import { shopifyGraphQL } from "../integrations/shopify";
 
 /** What support needs to know about one Shopify order. */
@@ -71,8 +71,8 @@ export function orderNumbersIn(text: string): string[] {
  * quoting its number; numbers that don't match come back as `unmatched`.
  * Never throws: without Shopify the AI simply asks for the order details.
  */
-export async function findOrders(email: string, text: string): Promise<{ orders: SupportOrder[]; unmatched: string[] }> {
-  const cfg = await getIntegrationConfig();
+export async function findOrders(storeId: string, email: string, text: string): Promise<{ orders: SupportOrder[]; unmatched: string[] }> {
+  const cfg = await getStoreConfig(storeId);
   if (!cfg.shopify) return { orders: [], unmatched: orderNumbersIn(text) };
   const who = `email:'${email.replace(/['\\]/g, "")}'`;
   const mentioned = orderNumbersIn(text);

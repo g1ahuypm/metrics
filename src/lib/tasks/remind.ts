@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "../db";
 import { hourIn, storeDate } from "../dates";
 import { validTimezone } from "../scope";
+import { firstStoreTimezone } from "../stores";
 import { addNotifications, pushNotifications, type NewNotification } from "../notify";
 import { daysUntilDue, fmtDue } from "./due";
 
@@ -21,14 +22,14 @@ function awake(now: Date, tz: string): boolean {
  */
 export async function runTaskReminders(now = new Date()): Promise<{ reminders: number }> {
   const [settings, tasks] = await Promise.all([
-    db.settings.findUnique({ where: { id: "default" }, select: { timezone: true } }),
+    firstStoreTimezone(),
     db.task.findMany({
       // Anything due within 3 days covers "due tomorrow" in every time zone.
       where: { status: "open", dueAt: { lte: new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000) } },
       include: { assignee: { select: { id: true, name: true } }, createdBy: { select: { id: true, timeZone: true } } },
     }),
   ]);
-  const storeTz = validTimezone(settings?.timezone);
+  const storeTz = validTimezone(settings);
 
   const items: NewNotification[] = [];
   for (const task of tasks) {

@@ -1,18 +1,22 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { resolveRange, type DateRange } from "./dates";
-import { db } from "./db";
+import { getStoreScope, type StoreScope } from "./stores";
+import type { SessionUser } from "./auth-shared";
 
 export const RANGE_COOKIE = "pd_range";
 
-export type Scope = { productId: string | undefined; range: DateRange };
+export type Scope = { productId: string | undefined; range: DateRange; stores: StoreScope; storeIds: string[] };
 
 /**
- * The product and date range the whole app is currently looking at.
- * Both live in cookies so they follow the user through every menu; URL
- * parameters still win when present (links, bookmarks, exports).
+ * The stores and date range the whole app is currently looking at (and a product,
+ * on its own page). Store and range live in cookies so they follow the user through
+ * every menu; URL parameters still win when present (links, bookmarks, exports).
  */
-export async function getScope(sp: { range?: string; from?: string; to?: string; product?: string } = {}): Promise<Scope> {
+export async function getScope(
+  user: Pick<SessionUser, "id" | "role">,
+  sp: { range?: string; from?: string; to?: string; product?: string; store?: string } = {},
+): Promise<Scope> {
   const jar = await cookies();
   // A product is only ever chosen by its own page (or an export link), never remembered.
   const productId = sp.product || undefined;
@@ -27,9 +31,9 @@ export async function getScope(sp: { range?: string; from?: string; to?: string;
       }
     }
   }
-  // Days follow the store's timezone (taken from Shopify on every sync).
-  const settings = await db.settings.findUnique({ where: { id: "default" }, select: { timezone: true } });
-  return { productId, range: resolveRange(rangeParams, validTimezone(settings?.timezone)) };
+  const stores = await getStoreScope(user, sp.store);
+  // "Today" and the range's days follow the store's timezone (taken from Shopify on every sync).
+  return { productId, range: resolveRange(rangeParams, validTimezone(stores.timezone)), stores, storeIds: stores.storeIds };
 }
 
 export function validTimezone(tz: string | null | undefined): string {

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "../db";
+import { allowedStores, canSeeStore, listStores } from "../stores";
 import { requireEditor } from "../auth";
 import { parseISODate } from "../dates";
 import { COST_TYPES } from "../constants";
@@ -65,7 +66,13 @@ export async function clearVariantTiersAction(productId: string, variantId: stri
 // ---------------------------------------------------------------------------
 
 export async function addCustomCostAction(_prev: FormState, formData: FormData): Promise<FormState> {
-  await requireEditor();
+  const me = await requireEditor();
+  // "" = shared by all stores (split by each store's revenue); only someone who sees every store may add one.
+  const storeId = String(formData.get("storeId") ?? "") || null;
+  const visible = await allowedStores(me);
+  if (storeId ? !visible.some((s) => s.id === storeId) : visible.length !== (await listStores()).length) {
+    return { error: "You can't add expenses for that store" };
+  }
   const parsed = z
     .object({
       name: z.string().trim().min(1, "Name is required"),
@@ -89,13 +96,15 @@ export async function addCustomCostAction(_prev: FormState, formData: FormData):
   if (parsed.data.endDate && parsed.data.endDate < parsed.data.startDate) {
     return { error: "End date must be after the start date" };
   }
-  await db.customCost.create({ data: parsed.data });
+  await db.customCost.create({ data: { ...parsed.data, storeId } });
   revalidatePath("/", "layout");
   return { success: "Expense added" };
 }
 
 export async function deleteCustomCostAction(id: string): Promise<void> {
-  await requireEditor();
+  const me = await requireEditor();
+  const cost = await db.customCost.findUnique({ where: { id }, select: { storeId: true } });
+  if (!cost || !(await canSeeStore(me, cost.storeId))) return;
   await db.customCost.delete({ where: { id } });
   revalidatePath("/", "layout");
 }

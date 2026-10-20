@@ -17,13 +17,15 @@ export async function GET(req: NextRequest) {
   if (!user || user.role === "SUPPORT") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const sp = req.nextUrl.searchParams;
-  const { range, productId: product } = await getScope({
+  const scope = await getScope(user, {
     range: sp.get("range") ?? undefined,
     from: sp.get("from") ?? undefined,
     to: sp.get("to") ?? undefined,
     product: sp.get("product") ?? undefined,
+    store: sp.get("store") ?? undefined,
   });
-  const { daily, totals } = await getMetrics(range, product);
+  const { range, productId: product } = scope;
+  const { daily, totals } = await getMetrics(range, scope, product);
 
   const lines = [COLUMNS.join(",")];
   for (const d of daily) {

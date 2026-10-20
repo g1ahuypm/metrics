@@ -2,12 +2,34 @@
 
 import { useActionState, useState, useTransition } from "react";
 import { Check, Copy, Trash2 } from "lucide-react";
-import { changeRoleAction, createInviteAction, removeMemberAction, revokeInviteAction } from "@/lib/actions/team";
+import { changeRoleAction, createInviteAction, removeMemberAction, revokeInviteAction, setMemberStoresAction } from "@/lib/actions/team";
 import { ROLE_LABELS, type Role, type SessionUser } from "@/lib/auth-shared";
 import { FormMessage } from "@/components/FormMessage";
 import { SubmitButton } from "@/components/SubmitButton";
 
-export function InviteForm({ isOwner }: { isOwner: boolean }) {
+type StoreChip = { id: string; name: string; color: string };
+
+function StoreBoxes({ stores, picked, onToggle, name }: { stores: StoreChip[]; picked?: Set<string>; onToggle?: (id: string) => void; name?: string }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {stores.map((s) => (
+        <label key={s.id} className="flex min-h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-2.5 text-xs has-[:checked]:border-ink has-[:checked]:bg-surface-2">
+          <input
+            type="checkbox"
+            name={name}
+            value={s.id}
+            {...(picked ? { checked: picked.has(s.id), onChange: () => onToggle?.(s.id) } : { defaultChecked: true })}
+            className="h-3.5 w-3.5 accent-[var(--accent)]"
+          />
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.color }} aria-hidden="true" />
+          {s.name}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+export function InviteForm({ isOwner, stores }: { isOwner: boolean; stores: StoreChip[] }) {
   const [state, action] = useActionState(createInviteAction, undefined);
   return (
     <form action={action} className="space-y-3">
@@ -24,6 +46,12 @@ export function InviteForm({ isOwner }: { isOwner: boolean }) {
           {isOwner && <option value="ADMIN">{ROLE_LABELS.ADMIN}</option>}
         </select>
       </div>
+      {stores.length > 1 && (
+        <fieldset>
+          <legend className="label">Stores they will see</legend>
+          <StoreBoxes stores={stores} name="storeIds" />
+        </fieldset>
+      )}
       <SubmitButton className="btn-primary w-full" pendingText="Creating…">Create invite link</SubmitButton>
     </form>
   );
@@ -72,15 +100,26 @@ export function MemberRow({
   member,
   me,
   editor,
+  stores,
 }: {
-  member: { id: string; name: string; email: string; role: Role; lastLoginAt: string };
+  member: { id: string; name: string; email: string; role: Role; lastLoginAt: string; storeIds: string[] };
   me: SessionUser;
   editor: boolean;
+  stores: StoreChip[];
 }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [picked, setPicked] = useState(new Set(member.storeIds));
   const isSelf = member.id === me.id;
   const locked = member.role === "OWNER" || isSelf || (member.role === "ADMIN" && me.role !== "OWNER");
+  const dirty = picked.size !== member.storeIds.length || member.storeIds.some((id) => !picked.has(id));
+  const toggle = (id: string) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
 
   return (
     <tr>
@@ -112,6 +151,34 @@ export function MemberRow({
           <span className="badge">{ROLE_LABELS[member.role]}</span>
         )}
       </td>
+      {stores.length > 1 && (
+        <td>
+          {member.role === "OWNER" ? (
+            <span className="text-xs text-ink-2">All stores</span>
+          ) : editor && !locked ? (
+            <div className="space-y-1.5">
+              <StoreBoxes stores={stores} picked={picked} onToggle={toggle} />
+              {dirty && (
+                <button
+                  type="button"
+                  className="btn-primary py-1 text-xs"
+                  disabled={pending}
+                  onClick={() =>
+                    start(async () => {
+                      const r = await setMemberStoresAction(member.id, [...picked]);
+                      setError(r?.error ?? null);
+                    })
+                  }
+                >
+                  Save stores
+                </button>
+              )}
+            </div>
+          ) : (
+            <span className="text-xs text-ink-2">{stores.filter((s) => member.storeIds.includes(s.id)).map((s) => s.name).join(", ") || "No stores"}</span>
+          )}
+        </td>
+      )}
       <td className="text-ink-2 whitespace-nowrap">{member.lastLoginAt}</td>
       {editor && (
         <td className="text-right">

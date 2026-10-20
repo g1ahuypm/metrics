@@ -3,29 +3,29 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Bot, ExternalLink, Package, User } from "lucide-react";
 import { requireSupport } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getSettingsRow } from "@/lib/integrations/config";
+import { canSeeStore } from "@/lib/stores";
 import { validTimezone } from "@/lib/scope";
 import { fmtDateTime } from "@/lib/format";
 import { findOrders } from "@/lib/support/orders";
-import { DEFAULT_SIGNATURE } from "@/lib/support/knowledge";
+import { defaultSignature } from "@/lib/support/knowledge";
 import { StatusBadge } from "@/components/support/StatusBadge";
 import { ReplyPanel } from "./ReplyPanel";
 
 export default async function SupportThreadPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireSupport();
+  const user = await requireSupport();
   const { id } = await params;
-  const thread = await db.supportThread.findUnique({ where: { id }, include: { messages: { orderBy: [{ createdAt: "asc" }, { sentAt: "asc" }] } } });
-  if (!thread) notFound();
+  const thread = await db.supportThread.findUnique({ where: { id }, include: { store: true, messages: { orderBy: [{ createdAt: "asc" }, { sentAt: "asc" }] } } });
+  if (!thread?.store || !(await canSeeStore(user, thread.storeId))) notFound();
+  const store = thread.store;
   if (thread.unread) await db.supportThread.update({ where: { id }, data: { unread: false } });
 
-  const [settings, article, { orders, unmatched }] = await Promise.all([
-    getSettingsRow(),
-    thread.topic ? db.kbArticle.findUnique({ where: { key: thread.topic }, select: { title: true } }) : Promise.resolve(null),
-    findOrders(thread.customerEmail, thread.messages.filter((m) => m.direction === "in").map((m) => `${m.subject}\n${m.text}`).join("\n")),
+  const [article, { orders, unmatched }] = await Promise.all([
+    thread.topic ? db.kbArticle.findUnique({ where: { storeId_key: { storeId: store.id, key: thread.topic } }, select: { title: true } }) : Promise.resolve(null),
+    findOrders(store.id, thread.customerEmail, thread.messages.filter((m) => m.direction === "in").map((m) => `${m.subject}\n${m.text}`).join("\n")),
   ]);
-  const tz = validTimezone(settings.timezone);
+  const tz = validTimezone(user.timeZone ?? store.timezone);
   const first = (thread.customerName ?? "").split(/\s+/)[0];
-  const blank = `Hi${first ? ` ${first}` : ""},\n\n\n\n${(settings.supportSignature || DEFAULT_SIGNATURE).trim()}`;
+  const blank = `Hi${first ? ` ${first}` : ""},\n\n\n\n${(store.supportSignature || defaultSignature(store.name)).trim()}`;
 
   return (
     <div>
@@ -38,6 +38,10 @@ export default async function SupportThreadPage({ params }: { params: Promise<{ 
           <span>
             {thread.customerName ? `${thread.customerName} · ` : ""}
             {thread.customerEmail}
+          </span>
+          <span className="badge">
+            <span className="h-1.5 w-1.5 rounded-full" style={{ background: store.color }} aria-hidden="true" />
+            {store.name}
           </span>
           <StatusBadge status={thread.status} category={thread.category} />
           {article && <span className="badge">{article.title}</span>}

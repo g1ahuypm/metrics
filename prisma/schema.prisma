@@ -32,6 +32,7 @@ model User {
   taskUpdates       TaskUpdate[]
   notifications     Notification[]
   pushSubscriptions PushSubscription[]
+  stores            UserStore[] // the stores this person may see (the owner sees all)
 }
 
 model Session {
@@ -55,6 +56,7 @@ model Invite {
   createdAt   DateTime  @default(now())
   expiresAt   DateTime
   acceptedAt  DateTime?
+  storeIds    String[]  @default([]) // stores the new member will see
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +65,8 @@ model Invite {
 
 model Settings {
   id        String @id @default("default")
+  // The store fields below are the single-store originals: since multi-store they live on Store
+  // (copied into the first store once) and are no longer read from here.
   storeName String @default("My Store")
   currency  String @default("USD")
   timezone  String @default("UTC")
@@ -91,6 +95,7 @@ model Settings {
   vapidPublicKey     String?
   vapidPrivateKey    String?
   lastTaskReminderAt DateTime?
+  storesMigratedAt   DateTime? // when this single-store setup was copied into the first Store
 
   // Meta Ads (token stored encrypted with APP_SECRET)
   metaAdAccountId String?
@@ -115,6 +120,8 @@ model Settings {
 model ProductVariant {
   id           String          @id @default(cuid())
   shopifyId    String          @unique
+  storeId      String?
+  store        Store?          @relation(fields: [storeId], references: [id], onDelete: Cascade)
   productId    String?
   productTitle String
   variantTitle String?
@@ -127,6 +134,8 @@ model ProductVariant {
   imageUrl     String?
   updatedAt    DateTime        @updatedAt
   lineItems    OrderLineItem[]
+
+  @@index([storeId, productId])
 }
 
 // Supplier cost per bundle quantity, per destination country.
@@ -151,6 +160,8 @@ model CostTier {
 model Order {
   id                String    @id @default(cuid())
   shopifyId         String    @unique
+  storeId           String?
+  store             Store?    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   name              String // e.g. #1042
   createdAt         DateTime
   processedAt       DateTime?
@@ -188,6 +199,7 @@ model Order {
   lineItems OrderLineItem[]
 
   @@index([createdAt])
+  @@index([storeId, createdAt])
   @@index([customerId])
 }
 
@@ -223,10 +235,17 @@ model Campaign {
   objective   String?
   dailyBudget Float?
   productId   String? // ProductVariant.productId this campaign sells (set in the app)
+  adAccountId String?
+  adAccount   AdAccount?  @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  // The store its spend counts for: the linked product's store, else the ad account's only store.
+  // Derived (recomputed on sync and when links change); null = not linked to a store yet.
+  storeId     String?
+  store       Store?      @relation(fields: [storeId], references: [id], onDelete: SetNull)
   updatedAt   DateTime    @updatedAt
   insights    AdInsight[]
 
   @@index([productId])
+  @@index([storeId])
 }
 
 model AdInsight {
@@ -265,6 +284,8 @@ model CustomCost {
   startDate DateTime
   endDate   DateTime?
   notes     String?
+  storeId   String? // null = shared by all stores, split by each store's revenue
+  store     Store?    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   createdAt DateTime  @default(now())
 }
 
@@ -273,13 +294,15 @@ model CustomCost {
 // ---------------------------------------------------------------------------
 
 model SyncLog {
-  id         String    @id @default(cuid())
-  source     String // "shopify" | "meta"
-  status     String // "running" | "success" | "error"
-  message    String?
-  records    Int       @default(0)
-  startedAt  DateTime  @default(now())
-  finishedAt DateTime?
+  id          String    @id @default(cuid())
+  source      String // "shopify" | "meta"
+  storeId     String? // Shopify syncs
+  adAccountId String? // Meta syncs
+  status      String // "running" | "success" | "error"
+  message     String?
+  records     Int       @default(0)
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +311,9 @@ model SyncLog {
 
 model SupportThread {
   id            String           @id @default(cuid())
-  key           String           @unique // Gmail thread id, or the first message's Message-ID
+  key           String // Gmail thread id, or the first message's Message-ID
+  storeId       String?
+  store         Store?           @relation(fields: [storeId], references: [id], onDelete: Cascade)
   subject       String
   customerEmail String
   customerName  String?
@@ -308,6 +333,7 @@ model SupportThread {
   updatedAt     DateTime         @updatedAt
   messages      SupportMessage[]
 
+  @@unique([storeId, key])
   @@index([category, status, lastMessageAt])
   @@index([customerEmail])
 }
@@ -316,7 +342,8 @@ model SupportMessage {
   id          String        @id @default(cuid())
   threadId    String
   thread      SupportThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  messageId   String        @unique // RFC 5322 Message-ID
+  messageId   String // RFC 5322 Message-ID
+  storeId     String? // the mailbox it arrived in (one email can reach two stores)
   references  String? // Message-IDs this one replies to, for threading
   direction   String // "in" (from the customer) | "out" (our reply)
   fromEmail   String
@@ -331,12 +358,15 @@ model SupportMessage {
   aiAttempts  Int           @default(0) // failed AI tries (rate limit, outage); after 3 a person takes over
   createdAt   DateTime      @default(now())
 
+  @@unique([storeId, messageId])
   @@index([threadId, sentAt])
 }
 
 model KbArticle {
   id          String   @id @default(cuid())
-  key         String   @unique // stable id the AI answers with, e.g. "refund_return"
+  key         String // stable id the AI answers with, e.g. "refund_return"
+  storeId     String?
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
   title       String // "Refunds and returns"
   whenToUse   String // which customer questions this answers
   answer      String // the facts and the structure of the reply
@@ -344,6 +374,8 @@ model KbArticle {
   flagForTeam Boolean  @default(false) // someone must also act (refund, address change)
   sortOrder   Int      @default(0)
   updatedAt   DateTime @updatedAt
+
+  @@unique([storeId, key])
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +394,8 @@ model Task {
   dueTimeZone String
   dueAt       DateTime // the moment it becomes overdue
   link        String?
+  storeId     String? // optional: which store the task is about
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: SetNull)
 
   assigneeId  String
   assignee    User    @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
@@ -428,4 +462,84 @@ model PushSubscription {
   lastUsedAt DateTime?
 
   @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Stores (several Shopify stores in one dashboard) and Meta ad accounts
+// ---------------------------------------------------------------------------
+
+model Store {
+  id        String   @id @default(cuid())
+  name      String
+  color     String   @default("#6D4AFF") // dot and chip colour in the store switcher
+  sortOrder Int      @default(0)
+  currency  String   @default("USD")
+  timezone  String   @default("UTC")
+  createdAt DateTime @default(now())
+
+  // Shopify (Dev Dashboard app, client credentials grant; secrets encrypted)
+  shopifyDomain       String?
+  shopifyClientId     String?
+  shopifyClientSecret String?
+  shopifyToken        String?
+  shopifyTokenExpires DateTime?
+  lastShopifySyncAt   DateTime?
+
+  // Support mailbox (Gmail over IMAP/SMTP with an app password, encrypted)
+  supportEmail       String?
+  supportAppPassword String?
+  supportAutoReply   Boolean   @default(true)
+  supportSignature   String?
+  supportAbout       String? // one line for the AI: what the store sells
+  supportUidValidity String?
+  supportLastUid     Int?
+  lastSupportSyncAt  DateTime?
+  supportLockUntil   DateTime?
+
+  // Cost assumptions for this store's orders
+  paymentFeePercent   Float @default(2.9)
+  paymentFeeFixed     Float @default(0.30)
+  platformFeePercent  Float @default(0)
+  defaultShippingCost Float @default(0)
+  defaultHandlingCost Float @default(0)
+  defaultCogsPercent  Float @default(0)
+
+  users       UserStore[]
+  adAccounts  StoreAdAccount[]
+  variants    ProductVariant[]
+  orders      Order[]
+  campaigns   Campaign[]
+  customCosts CustomCost[]
+  threads     SupportThread[]
+  articles    KbArticle[]
+  tasks       Task[]
+}
+
+model UserStore {
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@id([userId, storeId])
+}
+
+model AdAccount {
+  id            String           @id @default(cuid())
+  metaAccountId String           @unique // act_123…
+  name          String?
+  token         String? // encrypted system-user token with ads_read
+  lastSyncAt    DateTime?
+  createdAt     DateTime         @default(now())
+  stores        StoreAdAccount[]
+  campaigns     Campaign[]
+}
+
+model StoreAdAccount {
+  storeId     String
+  store       Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  adAccountId String
+  adAccount   AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, adAccountId])
 }

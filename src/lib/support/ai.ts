@@ -30,11 +30,11 @@ export type Article = { key: string; title: string; whenToUse: string; answer: s
 export type ThreadMessage = { direction: "in" | "out"; from: string; sentAt: Date; text: string; latest: boolean };
 
 /** Stable instructions plus the knowledge base: identical across emails, so it is cached. */
-function systemPrompt(store: string, articles: Article[]): string {
+function systemPrompt(store: string, about: string | null, articles: Article[]): string {
   const kb = articles
     .map((a) => `<article key="${a.key}">\n<title>${a.title}</title>\n<when_to_use>${a.whenToUse}</when_to_use>\n<answer>\n${a.answer}\n</answer>\n</article>`)
     .join("\n");
-  return `You are the customer care writer for ${store}, an online store selling educational books (main product: "Winnie the Pooh: The Complete Stories and Poems"). You read one email thread from the support inbox and decide two things: whether it is from a customer, and what to reply.
+  return `You are the customer care writer for ${store}, ${about?.trim() || "an online store"}. You read one email thread from the support inbox and decide two things: whether it is from a customer, and what to reply.
 
 Sorting:
 - category "customer": shoppers and customers writing about orders, products, the offer, shipping, returns, refunds, payments or the store. A short or badly written email from a real person is still a customer.
@@ -107,7 +107,7 @@ Messages are in the order we received them. Decide and write the reply to the cu
 export type DecideResult = { ok: true; decision: SupportDecision } | { ok: false; error: string; retry: boolean };
 
 /** One Claude call per email: sort it, match a knowledge-base article, and draft the reply. */
-export async function decide(input: Parameters<typeof userPrompt>[0] & { store: string; articles: Article[] }): Promise<DecideResult> {
+export async function decide(input: Parameters<typeof userPrompt>[0] & { store: string; about: string | null; articles: Article[] }): Promise<DecideResult> {
   if (!process.env.ANTHROPIC_API_KEY) return { ok: false, error: "The AI is not set up: add ANTHROPIC_API_KEY in Vercel.", retry: false };
   // Short enough that a whole check fits in the 60-second hosting limit; a timeout is retried next check.
   const client = new Anthropic({ timeout: 40_000, maxRetries: 1 });
@@ -118,7 +118,7 @@ export async function decide(input: Parameters<typeof userPrompt>[0] & { store: 
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       output_config: { effort: "medium", format: betaZodOutputFormat(Decision) },
-      system: [{ type: "text", text: systemPrompt(input.store, input.articles), cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text", text: systemPrompt(input.store, input.about, input.articles), cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userPrompt(input) }],
     });
     if (response.stop_reason === "refusal") return { ok: false, error: "The AI declined to answer this email.", retry: false };

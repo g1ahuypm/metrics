@@ -6,7 +6,7 @@ import { InviteForm } from "./InviteForm";
 export default async function InvitePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const invite = await db.invite.findUnique({ where: { token }, include: { createdBy: true } });
-  const settings = await db.settings.findUnique({ where: { id: "default" } });
+  const stores = invite ? await db.store.findMany({ where: { id: { in: invite.storeIds } }, orderBy: { sortOrder: "asc" }, select: { name: true } }) : [];
 
   if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) {
     return (
@@ -22,7 +22,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
 
   return (
     <div>
-      <h1 className="text-2xl font-extrabold tracking-tight">Join {settings?.storeName ?? "the team"}</h1>
+      <h1 className="text-2xl font-extrabold tracking-tight">Join {stores.length ? stores.map((s) => s.name).join(" & ") : "the team"}</h1>
       <p className="mt-1 text-sm text-ink-2">
         {invite.createdBy.name} invited you as <strong>{ROLE_LABELS[invite.role as Role]}</strong>. Create your
         account to get access to the dashboard.
