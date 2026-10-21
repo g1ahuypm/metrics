@@ -1,5 +1,6 @@
 # Checks the support inbox every 5 minutes so customers get answers quickly,
-# and sends team task reminders (due tomorrow, due today, overdue).
+# sends team task reminders (due tomorrow, due today, overdue), and brings in new
+# Shopify orders and Meta spend so the app never has to sync while someone is using it.
 # Vercel's free plan allows only one daily cron, so GitHub runs this instead.
 # Needs one repository secret: CRON_SECRET (the same value as in Vercel).
 name: Check support inbox
@@ -39,3 +40,13 @@ jobs:
           if [ -z "$CRON_SECRET" ]; then exit 0; fi
           SECRET="$(printf '%s' "$CRON_SECRET" | tr -d '[:space:]')"
           curl --fail-with-body -sS --max-time 90 -H "Authorization: Bearer $SECRET" "$APP_URL/api/cron/tasks"
+
+      - name: Bring in new orders and ad spend
+        if: always()
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://metrics-azure.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then exit 0; fi
+          SECRET="$(printf '%s' "$CRON_SECRET" | tr -d '[:space:]')"
+          curl --fail-with-body -sS --max-time 90 -H "Authorization: Bearer $SECRET" "$APP_URL/api/cron/sync"

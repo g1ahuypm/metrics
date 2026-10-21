@@ -3,12 +3,14 @@ import { after } from "next/server";
 import { db } from "./db";
 import { runAllSyncs } from "./sync";
 
-const STALE_MS = 60 * 60 * 1000; // refresh when the newest sync is older than an hour
+// The scheduler syncs about every half hour; this is only the backup when it hasn't run for a while,
+// because a sync started from a page visit shares the server with the pages being opened.
+const STALE_MS = 3 * 60 * 60 * 1000;
 const RUNNING_MS = 10 * 60 * 1000; // treat a "running" log newer than this as still in progress
 
 /**
- * Keeps data fresh without a frequent cron: when someone opens the app and the
- * last sync is stale, a sync runs in the background after the page is served.
+ * Backup for the scheduler: when someone opens the app and the last sync is over three
+ * hours old, a sync runs in the background after the page is served.
  */
 export async function maybeAutoSync(): Promise<void> {
   const [stores, accounts] = await Promise.all([

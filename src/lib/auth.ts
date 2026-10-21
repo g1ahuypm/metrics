@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { randomBytes } from "crypto";
@@ -46,18 +47,18 @@ export async function destroySession(): Promise<void> {
   jar.delete(SESSION_COOKIE);
 }
 
-export async function getCurrentUser(): Promise<SessionUser | null> {
+/**
+ * The signed-in person, looked up once per page load (the layout and the page share it)
+ * and in a single database round trip.
+ */
+export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  const session = await db.session.findUnique({
-    where: { token },
-    include: { user: true },
-  });
-  if (!session || session.expiresAt < new Date()) return null;
-  const { user } = session;
+  const user = await db.user.findFirst({ where: { sessions: { some: { token, expiresAt: { gt: new Date() } } } } });
+  if (!user) return null;
   return { id: user.id, email: user.email, name: user.name, role: user.role as Role, timeZone: user.timeZone };
-}
+});
 
 /** Signed in, any role. Support staff only ever see the Support pages. */
 export async function requireSignedIn(): Promise<SessionUser> {

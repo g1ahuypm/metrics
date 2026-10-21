@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import type { Store } from "@prisma/client";
 import { db } from "./db";
@@ -130,18 +131,23 @@ export async function recomputeCampaignStores(): Promise<void> {
 // Which stores a person sees, and which one they are looking at
 // ---------------------------------------------------------------------------
 
-export async function listStores(): Promise<Store[]> {
+/** Every store, in switcher order. Read once per page load. */
+export const listStores = cache(async (): Promise<Store[]> => {
   await ensureStores();
   return db.store.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] });
-}
+});
 
 /** The owner sees every store; everyone else the stores they were given. */
-export async function allowedStores(user: Pick<SessionUser, "id" | "role">): Promise<Store[]> {
-  const stores = await listStores();
-  if (user.role === "OWNER") return stores;
-  const mine = new Set((await db.userStore.findMany({ where: { userId: user.id }, select: { storeId: true } })).map((r) => r.storeId));
-  return stores.filter((s) => mine.has(s.id));
+export function allowedStores(user: Pick<SessionUser, "id" | "role">): Promise<Store[]> {
+  return allowedStoresFor(user.id, user.role);
 }
+
+const allowedStoresFor = cache(async (userId: string, role: string): Promise<Store[]> => {
+  if (role === "OWNER") return listStores();
+  const [stores, rows] = await Promise.all([listStores(), db.userStore.findMany({ where: { userId }, select: { storeId: true } })]);
+  const mine = new Set(rows.map((r) => r.storeId));
+  return stores.filter((s) => mine.has(s.id));
+});
 
 export type StoreScope = {
   /** Every store this person may see, in switcher order. */

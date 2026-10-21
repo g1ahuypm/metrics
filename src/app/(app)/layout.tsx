@@ -9,15 +9,16 @@ export const maxDuration = 60;
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireSignedIn();
   const scope = await getStoreScope(user);
+  // Badge counts and the background-job checks all go to the database at the same time.
   const [supportCount, inboxCount, overdueCount] = await Promise.all([
     canSupport(user.role)
       ? db.supportThread.count({ where: { storeId: { in: scope.storeIds }, category: { not: "other" }, status: { in: ["needs_reply", "needs_action"] } } })
       : 0,
     db.notification.count({ where: { userId: user.id, readAt: null } }),
     db.task.count({ where: { assigneeId: user.id, status: "open", dueAt: { lte: new Date() } } }),
+    user.role !== "SUPPORT" ? maybeAutoSync() : undefined,
+    maybeRemindTasks(),
   ]);
-  if (user.role !== "SUPPORT") await maybeAutoSync();
-  await maybeRemindTasks();
   return (
     <AppShell
       user={user}

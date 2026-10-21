@@ -1,5 +1,7 @@
 import "server-only";
+import { cache } from "react";
 import { db } from "./db";
+import { listStores } from "./stores";
 import { addDays, subDays } from "date-fns";
 import type { Prisma } from "@prisma/client";
 import { dayEnd, dayStart, daysInUtcMonth, eachDay, endOfUtcDay, storeDate, toISODate, utcDay, type DateRange } from "./dates";
@@ -248,8 +250,9 @@ async function loadOrderSlices(start: Date, end: Date, storeId: string, productI
 /** A store's revenue (charged − refunded) per calendar day in its own time zone, for sharing out expenses. */
 type StoreRevenue = { byStore: Map<string, Map<string, number>>; storeCount: number };
 
-async function storeRevenueByDay(from: Date, to: Date): Promise<StoreRevenue> {
-  const stores = await db.store.findMany({ select: { id: true, timezone: true } });
+// The same for every product on a page, so it is read once per page load.
+const storeRevenueByDay = cache(async (from: Date, to: Date): Promise<StoreRevenue> => {
+  const stores = await listStores();
   const tzOf = new Map(stores.map((s) => [s.id, validTimezone(s.timezone)]));
   // A day either side covers every time zone.
   const rows = await db.order.findMany({
@@ -265,7 +268,7 @@ async function storeRevenueByDay(from: Date, to: Date): Promise<StoreRevenue> {
     byStore.set(r.storeId, m);
   }
   return { byStore, storeCount: stores.length };
-}
+});
 
 type StoreRef = { id: string; timezone: string };
 
@@ -485,10 +488,9 @@ async function productStores(productId: string, storeIds?: string[]) {
  */
 export async function getMetrics(range: DateRange, scope: { storeIds: string[] }, productId?: string, opts: { previous?: boolean } = {}): Promise<MetricsReport> {
   const ids = productId ? await productStores(productId, scope.storeIds) : scope.storeIds;
-  const [stores, storeCount] = await Promise.all([
-    db.store.findMany({ where: { id: { in: ids } }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { id: true, name: true, color: true, timezone: true } }),
-    db.store.count(),
-  ]);
+  const all = await listStores();
+  const stores = all.filter((s) => ids.includes(s.id));
+  const storeCount = all.length;
   const withPrevious = opts.previous !== false;
   const needRevenue = Boolean(productId) || storeCount > 1;
   const [revNow, revPrev] = await Promise.all([
@@ -518,7 +520,7 @@ export async function getMetrics(range: DateRange, scope: { storeIds: string[] }
 
 /** Orders placed in the date range, each store's days in its own time zone. */
 async function orderWindows(range: DateRange, storeIds: string[]): Promise<Prisma.OrderWhereInput> {
-  const stores = await db.store.findMany({ where: { id: { in: storeIds } }, select: { id: true, timezone: true } });
+  const stores = (await listStores()).filter((s) => storeIds.includes(s.id));
   if (stores.length === 0) return { id: "none" };
   return {
     OR: stores.map((s) => {
@@ -606,7 +608,7 @@ export async function getCampaignBreakdown(range: DateRange, scope: { storeIds: 
 export async function getDataStatus(scope: { storeIds: string[] }) {
   const ids = scope.storeIds;
   const [stores, accounts, orderCount, insightCount, lastSyncs] = await Promise.all([
-    db.store.findMany({ where: { id: { in: ids } }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
+    listStores().then((all) => all.filter((s) => ids.includes(s.id))),
     db.adAccount.findMany({ where: { token: { not: null }, stores: { some: { storeId: { in: ids } } } }, select: { id: true } }),
     db.order.count({ where: { storeId: { in: ids } } }),
     db.adInsight.count({ where: { campaign: campaignsOf(ids) } }),
