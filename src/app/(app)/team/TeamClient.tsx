@@ -155,7 +155,7 @@ export function MemberRow({
         <td>
           {member.role === "OWNER" ? (
             <span className="text-xs text-ink-2">All stores</span>
-          ) : editor && !locked ? (
+          ) : me.role === "OWNER" && !locked ? (
             <div className="space-y-1.5">
               <StoreBoxes stores={stores} picked={picked} onToggle={toggle} />
               {dirty && (

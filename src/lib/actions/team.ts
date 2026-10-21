@@ -10,6 +10,8 @@ import type { FormState } from "./auth";
 
 export async function createInviteAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const me = await requireEditor();
+  // An invite decides which stores someone sees, and only the owner hands out store access.
+  if (me.role !== "OWNER") return { error: "Only the owner can invite people, because the owner decides which stores they see" };
   const parsed = z
     .object({
       email: z.union([z.literal(""), z.string().trim().toLowerCase().email("Enter a valid email")]),
@@ -17,9 +19,6 @@ export async function createInviteAction(_prev: FormState, formData: FormData): 
     })
     .safeParse({ email: formData.get("email") ?? "", role: formData.get("role") });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
-  if (parsed.data.role === "ADMIN" && me.role !== "OWNER") {
-    return { error: "Only the owner can invite admins" };
-  }
   // Which stores the new member will see; with a single store, that one.
   const mine = await allowedStores(me);
   const picked = formData.getAll("storeIds").map(String);
@@ -84,13 +83,13 @@ export async function changePasswordAction(_prev: FormState, formData: FormData)
   return { success: "Password updated" };
 }
 
-/** Which stores a member sees. Admins can only hand out stores they see themselves. */
+/** Which stores a member sees. Only the owner decides this. */
 export async function setMemberStoresAction(userId: string, storeIds: string[]): Promise<FormState> {
   const me = await requireEditor();
+  if (me.role !== "OWNER") return { error: "Only the owner can change which stores someone sees" };
   const target = await db.user.findUnique({ where: { id: userId } });
   if (!target) return { error: "User not found" };
   if (target.role === "OWNER") return { error: "The owner always sees every store" };
-  if (target.role === "ADMIN" && me.role !== "OWNER") return { error: "Only the owner can change an admin's stores" };
   const mine = new Set((await allowedStores(me)).map((s) => s.id));
   const wanted = new Set(storeIds.filter((id) => mine.has(id)));
   const current = await db.userStore.findMany({ where: { userId }, select: { storeId: true } });

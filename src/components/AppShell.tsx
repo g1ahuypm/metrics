@@ -204,7 +204,7 @@ export function AppShell({
       <main className="min-w-0 px-4 pb-32 pt-2 sm:px-6 lg:px-4 lg:pb-10 lg:pt-4">
         <div className="mx-auto max-w-7xl">
           {overdueBar}
-          {!/^\/(tasks|inbox|team)(\/|$)|^\/products\/./.test(pathname) && <StoreSwitcher stores={stores} current={currentStore} />}
+          {!/^\/(tasks|inbox|team)(\/|$)|^\/products\/./.test(pathname) && <StoreSwitcher stores={stores} current={currentStore} allowAll={user.role === "OWNER"} />}
           {/* A different store starts the page fresh, so no form keeps the last store's values. */}
           <Fragment key={currentStore ?? "all"}>{children}</Fragment>
         </div>

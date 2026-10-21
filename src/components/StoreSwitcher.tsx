@@ -6,11 +6,11 @@ import { setStoreAction } from "@/lib/actions/stores";
 
 export type SwitcherStore = { id: string; name: string; color: string };
 
-/** Store pills: every store this person may see, plus All stores. Shown only with two or more. */
-export function StoreSwitcher({ stores, current }: { stores: SwitcherStore[]; current: string | null }) {
+/** Store pills: every store this person may see, plus All stores for the owner. Shown only with two or more. */
+export function StoreSwitcher({ stores, current, allowAll }: { stores: SwitcherStore[]; current: string | null; allowAll: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [selected, setSelected] = useOptimistic(current ?? "all");
+  const [selected, setSelected] = useOptimistic(current ?? (allowAll ? "all" : stores[0]?.id ?? ""));
   if (stores.length < 2) return null;
   const pick = (id: string) =>
     start(async () => {
@@ -39,7 +39,7 @@ export function StoreSwitcher({ stores, current }: { stores: SwitcherStore[]; cu
   return (
     <div className="mb-4 -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0" aria-busy={pending}>
       <div role="tablist" aria-label="Store" className="inline-flex gap-1 rounded-full border border-border bg-surface p-1">
-        {pill("all", "All stores")}
+        {allowAll && pill("all", "All stores")}
         {stores.map((s) => pill(s.id, s.name, s.color))}
       </div>
     </div>

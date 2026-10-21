@@ -28,7 +28,7 @@ export default async function TeamPage() {
     <div>
       <PageHeader
         title="Team"
-        description="Everyone who can see this dashboard. Partners get read-only access to every report."
+        description="Everyone who can see this dashboard, and which stores each person sees."
       />
 
       <div className="grid gap-4 2xl:grid-cols-3">
@@ -63,12 +63,12 @@ export default async function TeamPage() {
         </div>
 
         <div className="space-y-4">
-          {editor && (
+          {me.role === "OWNER" && (
             <div className="card p-4">
               <h2 className="text-sm font-semibold">Invite someone</h2>
               <p className="mt-1 text-xs text-ink-3">Creates a link that works once and expires in 7 days.</p>
               <div className="mt-3">
-                <InviteForm isOwner={me.role === "OWNER"} stores={chips} />
+                <InviteForm isOwner stores={chips} />
               </div>
             </div>
           )}
@@ -77,15 +77,15 @@ export default async function TeamPage() {
             <dl className="mt-2 space-y-2 text-xs">
               <div>
                 <dt className="font-medium">{ROLE_LABELS.OWNER}</dt>
-                <dd className="text-ink-2">Full control, including admins and integrations.</dd>
+                <dd className="text-ink-2">Full control, including admins, integrations and who sees which stores. The only one who sees all stores together.</dd>
               </div>
               <div>
                 <dt className="font-medium">{ROLE_LABELS.ADMIN}</dt>
-                <dd className="text-ink-2">Edits costs, settings and integrations. Invites partners.</dd>
+                <dd className="text-ink-2">Edits costs, settings and integrations of the stores the owner gives them.</dd>
               </div>
               <div>
                 <dt className="font-medium">{ROLE_LABELS.PARTNER}</dt>
-                <dd className="text-ink-2">Sees every report and cost, cannot change anything.</dd>
+                <dd className="text-ink-2">Sees the reports and costs of the stores the owner gives them, cannot change anything.</dd>
               </div>
               <div>
                 <dt className="font-medium">{ROLE_LABELS.SUPPORT}</dt>

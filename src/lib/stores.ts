@@ -162,15 +162,22 @@ export type StoreScope = {
 
 /**
  * The store the whole app is looking at. Remembered per device in a cookie
- * (set by the switcher); "All stores" the first time and whenever the
- * remembered store is no longer allowed.
+ * (set by the switcher). Only the owner can look at "All stores" (the first time,
+ * and whenever the remembered store is gone); everyone else always looks at one of
+ * their own stores, the first one when nothing valid is remembered.
  */
 export async function getStoreScope(user: Pick<SessionUser, "id" | "role">, override?: string): Promise<StoreScope> {
   const stores = await allowedStores(user);
   const wanted = override ?? (await cookies()).get(STORE_COOKIE)?.value ?? ALL_STORES;
-  const store = stores.length === 1 ? stores[0] : stores.find((s) => s.id === wanted) ?? null;
+  const picked = stores.find((s) => s.id === wanted) ?? null;
+  const store = stores.length === 1 ? stores[0] : picked ?? (canSeeAllStores(user) ? null : stores[0] ?? null);
   const covered = store ? [store] : stores;
   return { stores, store, storeIds: covered.map((s) => s.id), timezone: (store ?? stores[0])?.timezone ?? "UTC" };
+}
+
+/** Only the owner sees every store added up ("All stores"). */
+export function canSeeAllStores(user: Pick<SessionUser, "role">): boolean {
+  return user.role === "OWNER";
 }
 
 /** True when the person may see this store. */
