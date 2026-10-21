@@ -84,7 +84,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             {store.name}
           </h2>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {/* Keyed by store: switching stores must start every form fresh, never keep the last store's values. */}
             <IntegrationCard
+              key={`shopify-${store.id}`}
               title="Shopify"
               description="Orders, refunds, products and cost per item from the Admin API."
               connect={connectShopifyAction.bind(null, store.id)}
@@ -113,6 +115,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <h2 className="text-sm font-bold">Store details</h2>
               <div className="mt-3">
                 <StoreDetailsForm
+                  key={store.id}
                   save={updateStoreDetailsAction.bind(null, store.id)}
                   store={{ name: store.name, color: store.color, currency: store.currency, timezone: store.timezone }}
                   colors={STORE_COLORS}
@@ -123,6 +126,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
           <div className="mt-4">
             <SupportSettingsCard
+              key={store.id}
               save={saveSupportSettingsAction.bind(null, store.id)}
               storeName={store.name}
               about={store.supportAbout}

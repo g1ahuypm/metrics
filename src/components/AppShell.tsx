@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AlertTriangle, Bell, CheckSquare, LayoutDashboard, LifeBuoy, LogOut, Megaphone, MoreHorizontal, Package, Receipt, Settings, ShoppingBag, Users, X } from "lucide-react";
@@ -205,7 +205,8 @@ export function AppShell({
         <div className="mx-auto max-w-7xl">
           {overdueBar}
           {!/^\/(tasks|inbox|team)(\/|$)|^\/products\/./.test(pathname) && <StoreSwitcher stores={stores} current={currentStore} />}
-          {children}
+          {/* A different store starts the page fresh, so no form keeps the last store's values. */}
+          <Fragment key={currentStore ?? "all"}>{children}</Fragment>
         </div>
       </main>
 
