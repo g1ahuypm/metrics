@@ -3,6 +3,36 @@
 Read this whole file before touching code. It is the state of the project and the
 owner's expectations as of the last session.
 
+## NOW (Oct 21, 2026) — start here
+
+Live at https://metrics-azure.vercel.app, all owner-approved and deployed (head of
+`claude/ecommerce-metrics-dashboard-ujpiqd`):
+- App is now called **Margin**, Look C (lavender/white, violet #6D4AFF + teal profit, Plus Jakarta Sans,
+  floating sidebar, phone bottom tab bar). Installable on phones via Add to Home Screen (no App Store).
+- **Multi-store** (see "Oct 20 (later)" below). Live: one store named "LearnWell" (from the old
+  Settings.storeName); the store switcher appears only once a 2nd store is added.
+- **Tasks + personal Inbox + phone/browser notifications**: owner confirmed notifications work on his phone.
+- **Support AI**: owner added ANTHROPIC_API_KEY in Vercel (confirmed by him). The 5-minute GitHub check
+  is green and reports per store: `{"ok":true,"stores":{"LearnWell":{...}}}`.
+
+Next, in order:
+1. Owner sends a test email ("Where is my order?") from a personal address to learnwellsupport@gmail.com
+   and says "sent". Then: read the run's GitHub Actions log (workflow "Check support inbox", trigger it with
+   workflow_dispatch if needed) and the thread in Support, review the AI's first REAL reply with him, and
+   tune the knowledge base (LearnWell's "Questions about a book" article still needs real facts; review "The offer").
+2. Help him add his other stores one by one (Settings → Add a store, a Dev Dashboard app per store with
+   read_orders/read_products/read_inventory/read_customers, ad account tick-boxes, the store's support Gmail
+   + app password, the "What the store sells" line). New stores' KB topics start with auto-send OFF.
+3. Then his next requests.
+Known, not fixed: intermittent React hydration error #418 on /orders (pre-existing, also before the redesign;
+page renders fine). Advise rotating secrets pasted in earlier chats (Shopify client secrets, Neon password).
+
+Working conventions: each session develops on its own branch (this one used `claude/eager-cray-sncji0`),
+tests locally (Postgres 16, `npx next build && npx next start`, Playwright at 1360 and 390 px, numbers
+checked to the cent), shows the owner screenshots, and deploys only after he says so by fast-forwarding
+`claude/ecommerce-metrics-dashboard-ujpiqd`. The live site can't be fetched from the sandbox (proxy 403);
+verify deploys through the GitHub Actions logs of the 5-minute check.
+
 ## WHERE WE LEFT OFF (latest session, Oct 19, 2026) — read this first
 
 Oct 20 (later): **Multi-store** built on `claude/eager-cray-sncji0`, tested, owner approved, DEPLOYED
