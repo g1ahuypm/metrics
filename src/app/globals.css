@@ -31,6 +31,8 @@
   --series-2: #e8590c; /* ad spend */
   --series-3: #0b7a6f; /* profit */
   --series-4: #f5a524; /* other */
+  --cash-in: #00897a; /* Cash page: money in (checked for colour blindness against the light surface) */
+  --cash-out: #e8590c; /* Cash page: money out */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -64,6 +66,8 @@
     --series-2: #f07a3a;
     --series-3: #2bb5a6;
     --series-4: #f5a524;
+    --cash-in: #1fa898;
+    --cash-out: #e8692a;
   }
 }
 
@@ -163,4 +167,16 @@ body {
   .alert-success {
     @apply rounded-xl border border-good/30 bg-good/10 px-3 py-2 text-sm text-good-text;
   }
+}
+
+/* ---- Top progress bar while a page opens (NavProgress) ---------------- */
+@keyframes nav-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+.nav-progress {
+  animation: nav-progress 0.9s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-progress { animation: none; width: 100%; opacity: 0.6; }
 }

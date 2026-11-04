@@ -1,11 +1,12 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AlertTriangle, Bell, CheckSquare, LayoutDashboard, LifeBuoy, LogOut, Megaphone, MoreHorizontal, Package, Receipt, Settings, ShoppingBag, Users, X } from "lucide-react";
 import { Logo } from "./Logo";
 import { DeviceSetup } from "./DeviceSetup";
+import { NavProgress } from "./NavProgress";
 import { StoreSwitcher, type SwitcherStore } from "./StoreSwitcher";
 import { logoutAction } from "@/lib/actions/auth";
 import { canEdit, canSupport, ROLE_LABELS, type SessionUser } from "@/lib/auth-shared";
@@ -46,6 +47,9 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  // The page a click is opening, lit up in the menu before it arrives.
+  const [opening, setOpening] = useState<string | null>(null);
+  const onNavigate = useCallback((path: string | null) => setOpening(path), []);
   const [open, setOpen] = useState(false);
   // The layout isn't re-rendered when moving between pages, so the counts refresh themselves.
   const [counts, setCounts] = useState({ unread: inboxCount, overdue: overdueCount });
@@ -72,7 +76,10 @@ export function AppShell({
   const supportOnly = user.role === "SUPPORT";
   const setup = SETUP.filter((n) => !n.editorOnly || canEdit(user.role));
 
-  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (href: string) => {
+    const at = opening ?? pathname;
+    return at === href || at.startsWith(`${href}/`);
+  };
 
   const link = ({ href, label, icon: Icon }: (typeof NAV)[number]) => {
     const active = isActive(href);
@@ -246,6 +253,9 @@ export function AppShell({
         </div>
       </nav>
       <DeviceSetup timeZone={user.timeZone} />
+      <Suspense fallback={null}>
+        <NavProgress onNavigate={onNavigate} />
+      </Suspense>
     </div>
   );
 }
