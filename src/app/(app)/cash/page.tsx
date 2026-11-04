@@ -94,7 +94,13 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
                           {a.name}
                           {a.mask ? ` ••${a.mask}` : ""}
                         </span>
-                        <span className="tnum">{fmtMoney(a.type === "credit" ? -(a.currentBalance ?? 0) : (a.currentBalance ?? 0))}</span>
+                        <span className="text-right tnum">
+                          {fmtMoney(a.type === "credit" ? -(a.currentBalance ?? 0) : (a.currentBalance ?? 0))}
+                          {/* Both of the bank's numbers, so they can be compared with its app. */}
+                          {a.availableBalance !== null && Math.abs((a.availableBalance ?? 0) - (a.currentBalance ?? 0)) >= 0.005 && (
+                            <span className="block text-[11px] text-ink-3">available {fmtMoney(a.availableBalance)}</span>
+                          )}
+                        </span>
                       </li>
                     )),
                 )}
