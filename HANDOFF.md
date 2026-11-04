@@ -38,6 +38,12 @@ On branch `claude/stoic-dijkstra-rtla59`, tested, NOT deployed yet (waiting for 
    dashboard. Tested only against a local Plaid stand-in (sandbox can't reach Plaid): connect, two-page
    history, pending→posted keeps category, removed/modified lines, rules, re-login (update mode), every
    figure checked against independently computed totals.
+Nov 4, first live bank data: the bank describes most Shopify payouts without the word "Shopify" and Plaid
+calls them account transfers, so they sat under "Between your own accounts". Fix on branch: a transfer counts
+as between own accounts only with its opposite half in another counted account (within 3 days); deposits are
+matched to Shopify payouts by amount (needs the payout scopes). Open question for the owner: the bank's
+"current" vs "available" balance, since "Already in the account" came out negative (pending charges may
+already be inside the bank's current balance). Many small bank-fee lines were flagged to the owner.
 Other notes: GitHub's "every 5 minutes" schedule really runs every 30 min – 3 h; offered the owner a free
 external timer (cron-job.org) — not set up yet. Intermittent React #418 on /orders not reproducible (likely
 a browser extension).

@@ -60,7 +60,8 @@ export async function syncBank(connectionId: string): Promise<BankSyncResult> {
       const existing = known.get(t.transaction_id);
       if (!accountId || !existing) continue;
       const row = rowFor(t, accountId);
-      const sorted = existing.categorySource === "you" ? null : categorize(row, rules);
+      // The owner's own choice, and a deposit already matched to its Shopify payout, stay as they are.
+      const sorted = existing.categorySource === "you" || existing.payoutId ? null : categorize(row, rules);
       await db.bankTransaction.update({
         where: { id: existing.id },
         data: { ...row, ...(sorted ? { category: sorted.category, categorySource: sorted.source, storeId: existing.storeId ?? sorted.storeId } : {}) },
@@ -93,6 +94,7 @@ export async function syncBank(connectionId: string): Promise<BankSyncResult> {
       where: { id: connectionId },
       data: { cursor: changes.next_cursor || conn.cursor, historyStatus: changes.transactions_update_status ?? conn.historyStatus, lastSyncAt: now, lastError: null, needsReconnect: false },
     });
+    await matchTransfers();
     await matchPayouts();
     return { ok: true, message: `${bank}: ${accounts.length} account${accounts.length === 1 ? "" : "s"}, ${added} new or updated transactions, ${removed.length} removed`, added };
   } catch (err) {
@@ -112,14 +114,58 @@ export async function syncAllBanks(): Promise<BankSyncResult[]> {
   return out;
 }
 
+/** Plaid's own word that a line moved money between accounts. */
+const isTransferHint = (pc: string | null) => Boolean(pc && /^TRANSFER_(IN|OUT)_ACCOUNT_TRANSFER$/.test(pc));
+
 /**
- * Ties Shopify deposits in the bank to the payouts that caused them (same amount to the cent,
- * reaching the bank on the payout day or up to 5 days later), which also tells which store
- * the money came from. Each payout is used once; the closest date wins.
+ * "Between your own accounts" only when the other half is there: the same amount the other way in
+ * another counted account within 3 days (savings → checking). A transfer Plaid saw with no other half
+ * came from or went to somewhere else (often a Shopify payout described without the word "Shopify"),
+ * so it waits for the owner instead of being hidden as a transfer. Only automatic choices change.
+ */
+export async function matchTransfers(): Promise<number> {
+  const lines = await db.bankTransaction.findMany({
+    where: { pending: false, payoutId: null, categorySource: "auto", category: { in: ["TRANSFER", "UNSORTED"] }, account: { included: true } },
+    select: { id: true, accountId: true, amount: true, date: true, plaidCategory: true, category: true },
+    orderBy: { date: "asc" },
+  });
+  const hinted = lines.filter((l) => isTransferHint(l.plaidCategory));
+  const paired = new Set<string>();
+  for (const a of hinted) {
+    if (paired.has(a.id) || a.amount <= 0) continue;
+    const b = hinted
+      .filter((x) => !paired.has(x.id) && x.accountId !== a.accountId && Math.abs(x.amount + a.amount) < 0.005 && Math.abs(x.date.getTime() - a.date.getTime()) <= 3 * 864e5)
+      .sort((x, y) => Math.abs(x.date.getTime() - a.date.getTime()) - Math.abs(y.date.getTime() - a.date.getTime()))[0];
+    if (!b) continue;
+    paired.add(a.id);
+    paired.add(b.id);
+  }
+  let changed = 0;
+  for (const l of hinted) {
+    const want = paired.has(l.id) ? "TRANSFER" : "UNSORTED";
+    if (l.category === want) continue;
+    await db.bankTransaction.update({ where: { id: l.id }, data: { category: want } });
+    changed++;
+  }
+  return changed;
+}
+
+/**
+ * Ties deposits in the bank to the Shopify payouts that caused them (same amount to the cent,
+ * reaching the bank on the payout day or up to 5 days later), which also tells which store the
+ * money came from. Works whatever the bank calls the deposit: besides lines already sorted as
+ * payouts, any money in that is still unsorted and was sorted automatically is a candidate.
+ * Each payout is used once; the closest date wins.
  */
 export async function matchPayouts(): Promise<number> {
   const txs = await db.bankTransaction.findMany({
-    where: { payoutId: null, pending: false, category: "SHOPIFY_PAYOUT", account: { included: true } },
+    where: {
+      payoutId: null,
+      pending: false,
+      amount: { gt: 0 },
+      account: { included: true },
+      OR: [{ category: "SHOPIFY_PAYOUT" }, { category: "UNSORTED", categorySource: "auto" }],
+    },
     orderBy: { date: "asc" },
   });
   if (txs.length === 0) return 0;
@@ -127,7 +173,8 @@ export async function matchPayouts(): Promise<number> {
   const payouts = await db.shopifyPayout.findMany({ where: { status: "PAID", bankTransaction: null, issuedAt: { gte: from } }, orderBy: { issuedAt: "asc" } });
   const used = new Set<string>();
   let matched = 0;
-  for (const tx of txs) {
+  // Lines already called payouts get first pick of the payouts.
+  for (const tx of [...txs].sort((a, b) => Number(b.category === "SHOPIFY_PAYOUT") - Number(a.category === "SHOPIFY_PAYOUT"))) {
     const day = tx.date.getTime();
     const best = payouts
       .filter((p) => !used.has(p.id) && Math.abs(p.net - tx.amount) < 0.005)
@@ -136,7 +183,10 @@ export async function matchPayouts(): Promise<number> {
       .sort((a, b) => Math.abs(a.lag) - Math.abs(b.lag))[0];
     if (!best) continue;
     used.add(best.p.id);
-    await db.bankTransaction.update({ where: { id: tx.id }, data: { payoutId: best.p.id, storeId: tx.storeId ?? best.p.storeId } });
+    await db.bankTransaction.update({
+      where: { id: tx.id },
+      data: { payoutId: best.p.id, storeId: tx.storeId ?? best.p.storeId, ...(tx.categorySource === "auto" ? { category: "SHOPIFY_PAYOUT" } : {}) },
+    });
     matched++;
   }
   return matched;

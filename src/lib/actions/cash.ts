@@ -6,7 +6,7 @@ import { encrypt, decrypt } from "../crypto";
 import { requireOwner } from "../auth";
 import { getStoreConfig } from "../integrations/config";
 import { createLinkToken, exchangePublicToken, plaidConfigured, removeItem } from "../cash/plaid";
-import { matchPayouts, syncAllBanks, syncBank } from "../cash/sync";
+import { matchPayouts, matchTransfers, syncAllBanks, syncBank } from "../cash/sync";
 import { syncPayouts } from "../cash/payouts";
 import { categorize, matchText, ruleMatchFor } from "../cash/categorize";
 import { isCategory } from "../cash/categories";
@@ -66,6 +66,7 @@ export async function refreshCashAction(): Promise<Result> {
     const stores = await db.store.findMany({ where: { shopifyDomain: { not: null } }, select: { id: true } });
     for (const s of stores) await syncPayouts(await getStoreConfig(s.id));
     const banks = await syncAllBanks();
+    await matchTransfers();
     await matchPayouts();
     revalidatePath("/cash");
     const bad = banks.find((b) => !b.ok);
@@ -98,13 +99,15 @@ export async function setCategoryAction(txId: string, category: string, storeId:
     const rules = await db.cashRule.findMany();
     const others = await db.bankTransaction.findMany({ where: { categorySource: { not: "you" }, id: { not: txId }, amount: direction === "in" ? { gt: 0 } : { lte: 0 } } });
     for (const o of others) {
-      if (!matchText(o).includes(match)) continue;
+      // A deposit matched to its Shopify payout keeps that; everything else named alike follows the rule.
+      if (o.payoutId || !matchText(o).includes(match)) continue;
       const c = categorize(o, rules);
       await db.bankTransaction.update({ where: { id: o.id }, data: { category: c.category, categorySource: c.source, storeId: o.payoutId ? o.storeId : (c.storeId ?? o.storeId) } });
       changed++;
     }
   }
-  if (category === "SHOPIFY_PAYOUT") await matchPayouts();
+  await matchTransfers();
+  await matchPayouts();
   revalidatePath("/cash");
   return { ok: true, message: always ? `Saved. ${changed} other line${changed === 1 ? "" : "s"} named like it ${changed === 1 ? "was" : "were"} sorted the same way.` : "Saved." };
 }

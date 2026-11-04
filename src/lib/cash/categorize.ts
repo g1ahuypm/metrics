@@ -17,7 +17,7 @@ export function ruleMatchFor(tx: Pick<TxLike, "name" | "merchantName">): string 
 /**
  * Sorts a bank line. The owner's own rules come first; then only the cases that are
  * unambiguous: Shopify money in is a payout, Shopify money out is the Shopify bill,
- * Facebook/Meta charges are ads, and Plaid's own "account transfer" and "bank fees".
+ * Facebook/Meta charges are ads, and Plaid's "bank fees".
  * Everything else waits for the owner, because the account also holds personal spending.
  */
 export function categorize(tx: TxLike, rules: RuleLike[]): { category: CashCategory | string; source: "rule" | "auto"; storeId: string | null } {
@@ -33,7 +33,8 @@ export function categorize(tx: TxLike, rules: RuleLike[]): { category: CashCateg
   if (/shopify/.test(text)) return auto(tx.amount > 0 ? "SHOPIFY_PAYOUT" : "SHOPIFY_APPS");
   if (tx.amount < 0 && /(facebk|facebook|meta ads|meta platforms|fb\.me)/.test(text)) return auto("META_ADS");
   const pc = tx.plaidCategory ?? "";
-  if (pc === "TRANSFER_IN_ACCOUNT_TRANSFER" || pc === "TRANSFER_OUT_ACCOUNT_TRANSFER") return auto("TRANSFER");
+  // Plaid's "account transfer" becomes "between your own accounts" only once its other half is
+  // found in another counted account (matchTransfers); until then it waits for the owner.
   if (pc.startsWith("BANK_FEES")) return auto("BANK_FEES");
   return auto("UNSORTED");
 }
