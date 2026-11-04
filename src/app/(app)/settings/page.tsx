@@ -104,7 +104,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               ]}
               help={[
                 "Go to dev.shopify.com → Apps → Create app → Start from Dev Dashboard. Name it anything (one app per store).",
-                "Open Versions → New version. Under Scopes tick read_orders, read_products, read_inventory and read_customers, then Release.",
+                "Open Versions → New version. Under Scopes tick read_orders, read_products, read_inventory and read_customers, plus read_shopify_payments_accounts and read_shopify_payments_payouts for payouts on the Cash page, then Release.",
                 "On the Overview page click Install app (Installs card), pick this store and confirm. The app must be installed for the connection to work.",
                 "App settings → Credentials: copy the Client ID and Client secret into the fields here. Tokens are fetched automatically and renewed every 24 hours.",
                 "App settings → Protected customer data access: choose a reason such as Analytics and save, so orders can be matched to customers (new vs returning). Without it, everything else still syncs.",

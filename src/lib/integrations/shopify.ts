@@ -7,6 +7,7 @@ import { loadCostBook, repriceOrders } from "../costbook";
 import { recomputeCampaignStores } from "../stores";
 import { decrypt, encrypt } from "../crypto";
 import type { StoreConfig, ShopifyAuth } from "./config";
+import { syncPayouts } from "../cash/payouts";
 
 const API_VERSION = "2025-07";
 
@@ -431,6 +432,8 @@ export async function syncShopify(cfg: StoreConfig, opts: { full?: boolean } = {
   await repriceOrders({ storeId: cfg.storeId });
   // A product's store is known now, so campaigns linked to it count for that store.
   await recomputeCampaignStores();
+  // Payouts for the Cash page; a missing permission is noted on the store, never an error here.
+  await syncPayouts(cfg);
   await db.store.update({ where: { id: cfg.storeId }, data: { lastShopifySyncAt: new Date() } });
   return { variants, orders };
 }

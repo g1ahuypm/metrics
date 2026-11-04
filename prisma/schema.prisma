@@ -504,15 +504,22 @@ model Store {
   defaultHandlingCost Float @default(0)
   defaultCogsPercent  Float @default(0)
 
-  users       UserStore[]
-  adAccounts  StoreAdAccount[]
-  variants    ProductVariant[]
-  orders      Order[]
-  campaigns   Campaign[]
-  customCosts CustomCost[]
-  threads     SupportThread[]
-  articles    KbArticle[]
-  tasks       Task[]
+  users            UserStore[]
+  adAccounts       StoreAdAccount[]
+  variants         ProductVariant[]
+  orders           Order[]
+  campaigns        Campaign[]
+  customCosts      CustomCost[]
+  threads          SupportThread[]
+  articles         KbArticle[]
+  tasks            Task[]
+  payouts          ShopifyPayout[]
+  bankTransactions BankTransaction[]
+
+  // Shopify Payments: money not yet paid out (needs the payouts scopes on the Shopify app)
+  shopifyBalance     Float?
+  shopifyBalanceAt   DateTime?
+  shopifyPayoutsNote String? // why payouts can't be read, e.g. a missing permission
 }
 
 model UserStore {
@@ -542,4 +549,100 @@ model StoreAdAccount {
   adAccount   AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
 
   @@id([storeId, adAccountId])
+}
+
+// ---------------------------------------------------------------------------
+// Cash: the owner's bank (through Plaid) and Shopify payouts
+// ---------------------------------------------------------------------------
+
+/**
+ * One bank login connected through Plaid (one "Item").
+ */
+model BankConnection {
+  id              String        @id @default(cuid())
+  plaidItemId     String        @unique
+  accessToken     String // encrypted
+  institutionName String?
+  cursor          String? // /transactions/sync position
+  historyStatus   String? // Plaid's transactions_update_status
+  lastSyncAt      DateTime?
+  lastError       String? // e.g. the bank asks to log in again
+  needsReconnect  Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  accounts        BankAccount[]
+}
+
+model BankAccount {
+  id               String            @id @default(cuid())
+  connectionId     String
+  connection       BankConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  plaidAccountId   String            @unique
+  name             String
+  mask             String? // last 4 digits
+  type             String? // depository, credit…
+  subtype          String? // checking, savings…
+  currentBalance   Float?
+  availableBalance Float?
+  balanceAt        DateTime?
+  included         Boolean           @default(true) // counted on the Cash page
+  transactions     BankTransaction[]
+}
+
+/**
+ * A bank transaction. amount > 0 is money in, < 0 money out (Plaid's sign is the opposite).
+ */
+model BankTransaction {
+  id             String         @id @default(cuid())
+  accountId      String
+  account        BankAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  plaidId        String         @unique
+  date           DateTime // calendar date (UTC midnight)
+  amount         Float
+  name           String
+  merchantName   String?
+  pending        Boolean        @default(false)
+  plaidCategory  String? // personal_finance_category.detailed, a hint only
+  category       String         @default("UNSORTED")
+  categorySource String         @default("auto") // auto | rule | you
+  storeId        String? // the store it belongs to, when known (payouts, chosen by the owner)
+  store          Store?         @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  payoutId       String?        @unique // the Shopify payout this deposit is
+  payout         ShopifyPayout? @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+  note           String?
+  createdAt      DateTime       @default(now())
+
+  @@index([date])
+}
+
+/**
+ * "Always put transactions named like this in this category." Made when the owner says so.
+ */
+model CashRule {
+  id        String   @id @default(cuid())
+  match     String // lower-case text the name must contain
+  direction String   @default("any") // in | out | any
+  category  String
+  storeId   String?
+  createdAt DateTime @default(now())
+
+  @@unique([match, direction])
+}
+
+model ShopifyPayout {
+  id              String           @id // Shopify gid
+  storeId         String
+  store           Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  issuedAt        DateTime
+  status          String // SCHEDULED | PAID | FAILED | CANCELED
+  transactionType String // DEPOSIT | WITHDRAWAL
+  net             Float // what reaches (or leaves) the bank
+  salesGross      Float            @default(0)
+  fees            Float            @default(0) // all fees in the payout
+  refunds         Float            @default(0)
+  adjustments     Float            @default(0)
+  currency        String           @default("USD")
+  updatedAt       DateTime         @updatedAt
+  bankTransaction BankTransaction?
+
+  @@index([storeId, issuedAt])
 }

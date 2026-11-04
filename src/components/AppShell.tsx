@@ -3,7 +3,7 @@
 import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AlertTriangle, Bell, CheckSquare, LayoutDashboard, LifeBuoy, LogOut, Megaphone, MoreHorizontal, Package, Receipt, Settings, ShoppingBag, Users, X } from "lucide-react";
+import { AlertTriangle, Bell, CheckSquare, LayoutDashboard, LifeBuoy, Landmark, LogOut, Megaphone, MoreHorizontal, Package, Receipt, Settings, ShoppingBag, Users, X } from "lucide-react";
 import { Logo } from "./Logo";
 import { DeviceSetup } from "./DeviceSetup";
 import { NavProgress } from "./NavProgress";
@@ -20,6 +20,8 @@ const NAV = [
 
 const SUPPORT = { href: "/support", label: "Support", icon: LifeBuoy };
 const TASKS = { href: "/tasks", label: "Tasks", icon: CheckSquare };
+// The owner's bank (it also holds personal spending), so only the owner sees it.
+const CASH = { href: "/cash", label: "Cash", icon: Landmark };
 
 const SETUP = [
   { href: "/expenses", label: "Expenses & fees", icon: Receipt },
@@ -113,6 +115,7 @@ export function AppShell({
   ) : (
     <nav className="flex flex-col gap-1">
       {NAV.map(link)}
+      {user.role === "OWNER" && link(CASH)}
       {canSupport(user.role) && link(SUPPORT)}
       {link(TASKS)}
       <div className="mt-5 mb-1 px-3 text-xs font-semibold text-ink-3">Setup</div>

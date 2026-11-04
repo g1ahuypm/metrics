@@ -3,7 +3,46 @@
 Read this whole file before touching code. It is the state of the project and the
 owner's expectations as of the last session.
 
-## NOW (Oct 21, 2026) — start here
+## NOW (Nov 4, 2026) — start here
+
+Live (head of `claude/ecommerce-metrics-dashboard-ujpiqd`), owner-approved:
+- Support AI answers on its own (owner's real tests Oct 21: first reply held because the store's
+  "AI replies on its own" switch was off; after turning it on, the second test was answered automatically).
+  KB "Where is my order" updated with the "search Spam/Promotions for the confirmation email" line.
+- Speed (Oct 21): one-query session lookup, request-level caching of stores/scope/store revenue
+  (React cache), layout queries in parallel, Shopify/Meta sync moved to the GitHub check (step "Bring in new
+  orders and ad spend", /api/cron/sync); on-visit sync only after 3 h.
+- Store switch fix: page content keyed by store (AppShell `<Fragment key>`), Settings cards keyed by store id.
+- Store access: only the OWNER sees "All stores", ticks member stores and creates invites.
+- Alara Official (2nd store) has Shopify connected (syncing). Still to do for it: product costs per country,
+  ad-account ticks, support Gmail + app password, its KB (topics start with auto-send off).
+
+On branch `claude/stoic-dijkstra-rtla59`, tested, NOT deployed yet (waiting for the owner's OK):
+1. **Fix for frozen pages** — the speed work's `(app)/loading.tsx` and `experimental.staleTimes` broke
+   same-page updates in Next 15.5 (router.refresh stopped updating; on big pages a 2nd save in a row left the
+   screen frozen until another update). Both removed; `NavProgress` gives instant click feedback instead
+   (menu item lights up + top bar). Do NOT re-add loading.tsx/staleTimes without re-running the
+   "four saves in a row" test.
+2. **Cash page (owner only)** — bank through Plaid (owner chose Plaid; bank: Citizens US, USD, account mixed
+   with personal spending, Meta/suppliers paid by debit card). `src/lib/cash/*`, `src/app/(app)/cash/*`,
+   `src/lib/actions/cash.ts`. Balance split that always adds up: opening (balance before the first
+   transaction) + business cash profit + owner money (put in / personal) + transfers + not sorted.
+   Auto-sort: Shopify in = payout, Shopify out = bill, FACEBK/Meta = ads, Plaid account transfers/bank fees;
+   everything else waits for the owner (mixed personal account); "Always do this" makes a CashRule.
+   Payout deposits are matched to Shopify payouts (same amount, 0–5 days) to know the store.
+   Shopify payouts need scopes `read_shopify_payments_accounts` + `read_shopify_payments_payouts` on each
+   store's Dev Dashboard app (otherwise a note on the Cash page). Bank sync runs in /api/cron/sync after
+   Shopify (a bank needing re-login doesn't fail the check) and on "Refresh".
+   Env needed in Vercel: PLAID_CLIENT_ID, PLAID_SECRET (Production), PLAID_ENV=production. Plaid Trial is free
+   up to 10 Items; Citizens isn't in Plaid's public trial list — confirm under OAuth institutions in the Plaid
+   dashboard. Tested only against a local Plaid stand-in (sandbox can't reach Plaid): connect, two-page
+   history, pending→posted keeps category, removed/modified lines, rules, re-login (update mode), every
+   figure checked against independently computed totals.
+Other notes: GitHub's "every 5 minutes" schedule really runs every 30 min – 3 h; offered the owner a free
+external timer (cron-job.org) — not set up yet. Intermittent React #418 on /orders not reproducible (likely
+a browser extension).
+
+## Earlier (Oct 21, 2026)
 
 Live at https://metrics-azure.vercel.app, all owner-approved and deployed (head of
 `claude/ecommerce-metrics-dashboard-ujpiqd`):

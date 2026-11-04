@@ -81,6 +81,13 @@ export async function requireSupport(): Promise<SessionUser> {
   return user;
 }
 
+/** The owner only (the Cash page: the owner's bank, which also holds personal spending). */
+export async function requireOwner(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (user.role !== "OWNER") redirect("/dashboard?denied=1");
+  return user;
+}
+
 /** Redirects to the dashboard when the user cannot edit. */
 export async function requireEditor(): Promise<SessionUser> {
   const user = await requireUser();
