@@ -1,4 +1,4 @@
-import { requireSupport } from "@/lib/auth";
+import { canEdit, requireSupport } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { validTimezone } from "@/lib/scope";
 import { getStoreScope } from "@/lib/stores";
@@ -15,7 +15,7 @@ export default async function KnowledgePage() {
   if (!store) {
     return (
       <div>
-        <SupportHeader active="knowledge" mailbox={null} lastCheck={null} timeZone={tz} />
+        <SupportHeader showTest={canEdit(user.role)} active="knowledge" mailbox={null} lastCheck={null} timeZone={tz} />
         <div className="card px-4 py-10 text-center text-sm text-ink-2">Each store has its own knowledge base. Pick a store above to see and edit it.</div>
       </div>
     );
@@ -25,10 +25,10 @@ export default async function KnowledgePage() {
   const connected = Boolean(store.supportEmail && store.supportAppPassword);
   return (
     <div>
-      <SupportHeader active="knowledge" mailbox={connected ? store.supportEmail : null} lastCheck={store.lastSupportSyncAt} timeZone={tz} />
+      <SupportHeader showTest={canEdit(user.role)} active="knowledge" mailbox={connected ? store.supportEmail : null} lastCheck={store.lastSupportSyncAt} timeZone={tz} />
       <p className="mb-4 max-w-3xl text-sm text-ink-2">
         The AI answers {store.name}&apos;s customers only with what is written here and with their real Shopify order. Each topic says which questions it
-        covers and what the answer is. Turn off <strong className="font-medium text-ink">Send on its own</strong> for topics a person should always answer.
+        covers and what the answer is. The AI only writes drafts; your team checks and sends every reply.
       </p>
       <KnowledgeEditor
         storeId={store.id}

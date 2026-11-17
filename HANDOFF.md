@@ -64,6 +64,27 @@ and what is open, as of the last session (Nov 17, 2026). Sections after "START H
 - Urgent reminders: once a day per person, 9 am–9 pm their time, from 2 h after landing on To do, to whoever saved it, or
   (AI-caught) everyone who answers that store's email (owner, admins/support with the store). Bell + phone push.
 
+### Support AI v2: never sends, new instructions, Test the AI (built Nov 17–18 on `claude/wizardly-wozniak-bha1nu`, NOT deployed yet)
+- Owner's rule (Nov 18): **the AI never sends anything.** Every customer email gets a draft; Sunny or JP sends by hand.
+  Code: `handleThread` (run.ts) only stores drafts. `decisionNeeded()` labels a draft "Draft ready" (holdReason null)
+  or "Needs a decision: <reason>". The Settings switch "AI replies on its own" is gone (`supportAutoReply` forced false;
+  column kept). KB "Send on its own" became "Drafts can be marked ready" (same `autoSend` column).
+- New instructions (`currentPrompt` in ai.ts): ChatGPT's handoff (owner + ChatGPT, Nov 18) adapted: intent before
+  topic, waiting time, earlier unanswered requests, purchase intent, upset playbook, strict confidence, team-note rules;
+  my change: holding replies always end with "our team will reply here with …" (no deadline unless an article says so).
+  Owner chose: simple policy questions may be "ready"; actual return/refund/cancel/change requests need a person.
+  `previousPrompt` is kept only for side-by-side comparison.
+- Support → **Test the AI** (owner/admin): paste any email (optionally with the customer's real orders) or run the 12
+  standard cases (`src/lib/support/fixtures.ts`, made-up customers, LW9xxxxx orders), old vs new side by side.
+  Nothing stored or sent. Workflow **"Test support AI"** (`ai-test.yml`, manual) calls `/api/cron/ai-test?case=NN&compare=1`
+  and prints the results as JSON, so a session can read real-model results from the Actions log.
+- The sandbox can't call the real model (Anthropic hosts refuse user keys here); real results only after deploy.
+- ChatGPT's handoff also proposed KB articles (separate_purchase, digital_gifts, edition_mismatch, order_confirmation,
+  discount_code, wholesale_bulk, acknowledgment, gifting, supported_product_links) with OWNER FILL questions, and app
+  changes. Agreed order: (1) this, (2) a "What should the AI change?" box on Rewrite with AI, (3) waiting time +
+  attachment notices, then the rest by value. Real store facts: Puzzle Packet = digital ($19.99), Pooh's Fine Painted
+  Poster = PDF ($24.99), "Hundred Acre Puzzle Post" ($49.99, created Nov 10, no description: ask the owner what it is).
+
 ### Open items, in order
 1. **Deploy `7b3c888`** when the owner says "deploy".
 2. **Shopify payout permissions.** Each store's Dev Dashboard app needs `read_shopify_payments_accounts` and

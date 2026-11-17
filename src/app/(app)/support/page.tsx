@@ -51,7 +51,7 @@ export default async function SupportInboxPage({ searchParams }: { searchParams:
 
   return (
     <div>
-      <SupportHeader active="inbox" mailbox={mailboxes.length === 1 ? mailboxes[0].supportEmail : connected ? `${mailboxes.length} store inboxes` : null} lastCheck={lastCheck} timeZone={tz} />
+      <SupportHeader showTest={canEdit(user.role)} active="inbox" mailbox={mailboxes.length === 1 ? mailboxes[0].supportEmail : connected ? `${mailboxes.length} store inboxes` : null} lastCheck={lastCheck} timeZone={tz} />
 
       {!connected && (
         <div className="mb-4 flex flex-col gap-2 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
@@ -107,7 +107,7 @@ export default async function SupportInboxPage({ searchParams }: { searchParams:
                 <span className="block truncate text-sm text-ink">{t.subject}</span>
                 <span className="block truncate text-xs text-ink-3">{preview}</span>
                 <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <StatusBadge status={t.status} category={t.category} />
+                  <StatusBadge status={t.status} category={t.category} draftReady={Boolean(t.draft) && !t.holdReason} />
                   <TodoBadges onTodo={Boolean(t.todoAt) && tab.key !== "todo"} urgent={t.urgent} />
                   {shown.length > 1 && t.storeId && (
                     <span className="badge">

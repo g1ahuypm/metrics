@@ -14,6 +14,8 @@ export function ReplyPanel({
   draft,
   blank,
   holdReason,
+  draftReady,
+  afterSending,
   actionNote,
   todo,
   urgent,
@@ -24,6 +26,8 @@ export function ReplyPanel({
   draft: string | null;
   blank: string;
   holdReason: string | null;
+  draftReady: boolean;
+  afterSending: string | null;
   actionNote: string | null;
   todo: TodoInfo | null;
   urgent: boolean;
@@ -148,7 +152,17 @@ export function ReplyPanel({
           </button>
         </div>
       )}
-      {holdReason && <p className="mb-2 text-xs text-warn-text">Not sent automatically: {holdReason}. Check the reply below, then send it.</p>}
+      {holdReason && (
+        <p className="mb-2 text-xs text-warn-text">
+          <strong className="font-semibold">Needs a decision:</strong> {holdReason.replace(/\.$/, "")}. Fix the draft below if needed, then send it.
+        </p>
+      )}
+      {draftReady && <p className="mb-2 text-xs text-good-text">The AI&apos;s draft is ready. Read it, then send it.</p>}
+      {afterSending && (
+        <p className="mb-2 text-xs text-ink-2">
+          <strong className="font-semibold text-ink">After sending:</strong> {afterSending}
+        </p>
+      )}
       <label htmlFor="reply" className="mb-1 block text-xs font-medium text-ink-2">
         Reply to the customer
       </label>

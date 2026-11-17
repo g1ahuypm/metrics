@@ -4,14 +4,11 @@ import { decide, type Article, type SupportDecision } from "./ai";
 import { defaultSignature, ensureKnowledgeBase } from "./knowledge";
 import { fetchNewMail, getMailConfig, sendMail, type IncomingMail, type MailConfig } from "./mail";
 import { findOrders, orderNumbersIn } from "./orders";
-import { OFF_TODO } from "./todo";
 
 const senderName = (store: { name: string }) => `${store.name} Customer Care`;
-/** Safety limits on replies the AI sends by itself. */
-const AI_REPLIES_PER_DAY = 150;
-const AI_REPLIES_PER_THREAD_PER_DAY = 2; // stops reply loops with other auto-responders
-
-export type SupportRunResult = { fetched: number; handled: number; autoSent: number; forTeam: number; notCustomers: number; message: string };
+// The AI never sends anything. It writes a draft for every customer email; a person on the team
+// checks it and clicks Send. A draft is marked ready when nothing needs deciding, otherwise it says why.
+export type SupportRunResult = { fetched: number; handled: number; ready: number; needDecision: number; notCustomers: number; message: string };
 
 // ---------------------------------------------------------------------------
 // Storing incoming mail
@@ -118,19 +115,14 @@ export function withSignature(reply: string, store: { name: string; supportSigna
   return `${reply.trim()}\n\n${(store.supportSignature || defaultSignature(store.name)).trim()}`;
 }
 
-/** Why the AI's reply waits for a person instead of going out, or null when it may be sent. */
-function holdReason(d: SupportDecision, article: { autoSend: boolean } | undefined, autoReply: boolean): string | null {
-  if (d.needsPerson) return d.needsPersonReason || "Needs a person to read it first";
-  if (!autoReply) return "Automatic replies are turned off";
-  if (!article) return "No knowledge-base answer fits this email yet";
-  if (!article.autoSend) return "This topic is always answered by a person";
-  if (d.confidence !== "high") return "The AI was not sure enough to send on its own";
-  if (d.reply.trim().length < 40) return "The AI's reply was too short to send";
+/** What a person must decide before sending the AI's draft, or null when the draft only needs a check. */
+export function decisionNeeded(d: SupportDecision, article: { autoSend: boolean } | undefined): string | null {
+  if (d.needsPerson) return d.needsPersonReason || "A person needs to decide how to answer";
+  if (!article) return "No knowledge-base topic covers this email yet";
+  if (!article.autoSend) return "This topic always needs a person to check the facts";
+  if (d.confidence !== "high") return "The AI was not sure its answer is complete";
+  if (d.reply.trim().length < 40) return "The AI's draft is very short";
   return null;
-}
-
-async function aiRepliesSince(storeId: string, since: Date, threadId?: string) {
-  return db.supportMessage.count({ where: { storeId, direction: "out", sentBy: "AI", sentAt: { gte: since }, ...(threadId ? { threadId } : {}) } });
 }
 
 /** Sends a reply in a thread and records it. Used by the AI and by the team. */
@@ -167,9 +159,9 @@ export async function sendThreadReply(cfg: MailConfig, threadId: string, text: s
   });
 }
 
-type Outcome = "sent" | "team" | "other" | "retry";
+type Outcome = "ready" | "decide" | "other" | "retry";
 
-async function handleThread(cfg: MailConfig, threadId: string, articles: Awaited<ReturnType<typeof loadArticles>>): Promise<Outcome> {
+async function handleThread(threadId: string, articles: Awaited<ReturnType<typeof loadArticles>>): Promise<Outcome> {
   // Claim the thread's unhandled messages so a parallel run can't answer them too.
   const claimedAt = new Date();
   const claim = await db.supportMessage.updateMany({ where: { threadId, direction: "in", processedAt: null }, data: { processedAt: claimedAt } });
@@ -189,7 +181,7 @@ async function handleThread(cfg: MailConfig, threadId: string, articles: Awaited
       where: { id: threadId },
       data: { category: thread.category === "pending" ? "customer" : thread.category, status: "needs_reply", holdReason: result.error, orderNames },
     });
-    return "team";
+    return "decide";
   }
 
   const d = result.decision;
@@ -204,37 +196,21 @@ async function handleThread(cfg: MailConfig, threadId: string, articles: Awaited
   const article = kb.find((a) => a.key === d.topic);
   const text = d.reply.trim() ? withSignature(d.reply, settings) : null;
   const actionNote = d.teamAction.trim() || (article?.flagForTeam ? d.summary : "") || null;
-  let reason = onlyHistory
-    ? "Arrived before Support was connected. Check it wasn't already answered in Gmail"
-    : holdReason(d, article, settings.supportAutoReply);
-  // Hard rule: a reply never goes out on its own if it names an order that isn't this customer's.
+  let reason = onlyHistory ? "Arrived before Support was connected. Check it wasn't already answered in Gmail" : decisionNeeded(d, article);
+  // A draft that names an order that isn't this customer's always needs a person.
   const own = new Set(orders.map((o) => o.name.replace("#", "").toUpperCase()));
   const foreign = orderNumbersIn(d.reply).filter((n) => !own.has(n));
-  if (!reason && foreign.length) reason = `The reply mentions ${foreign.map((n) => `#${n}`).join(", ")}, which is not this customer's order`;
-  if (!reason) {
-    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    if ((await aiRepliesSince(settings.id, dayAgo, threadId)) >= AI_REPLIES_PER_THREAD_PER_DAY) reason = "Already answered twice today; a person should take over";
-    else if ((await aiRepliesSince(settings.id, dayAgo)) >= AI_REPLIES_PER_DAY) reason = "Daily limit of automatic replies reached";
-  }
+  if (!reason && foreign.length) reason = `The draft mentions ${foreign.map((n) => `#${n}`).join(", ")}, which is not this customer's order`;
+  if (!text) reason ??= "The AI wrote no reply";
 
-  const base = { category: "customer", topic: article?.key ?? null, summary: d.summary, orderNames, actionNote };
-  if (!reason && text) {
-    try {
-      await sendThreadReply(cfg, threadId, text, "AI");
-      await db.supportThread.update({
-        where: { id: threadId },
-        data: { ...base, status: actionNote ? "needs_action" : "auto_replied", draft: null, holdReason: null, ...(thread.todoAuto ? OFF_TODO : {}) },
-      });
-      return "sent";
-    } catch (err) {
-      reason = `Sending failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
-    }
-  }
   // A clearly upset customer goes straight onto the team's To do list, marked urgent (reminders until
   // answered). Not for mail from before Support was connected: it may already be answered in Gmail.
   const upset = d.upset && !onlyHistory ? { urgent: true, ...(thread.todoAt ? {} : { todoAt: new Date(), todoAuto: true }) } : {};
-  await db.supportThread.update({ where: { id: threadId }, data: { ...base, status: "needs_reply", draft: text, holdReason: reason, ...upset } });
-  return "team";
+  await db.supportThread.update({
+    where: { id: threadId },
+    data: { category: "customer", topic: article?.key ?? null, summary: d.summary, orderNames, actionNote, status: "needs_reply", draft: text, holdReason: reason, ...upset },
+  });
+  return reason ? "decide" : "ready";
 }
 
 // ---------------------------------------------------------------------------
@@ -258,10 +234,10 @@ export async function runSupport(storeId: string, opts: { budgetMs?: number } = 
     where: { id: storeId, OR: [{ supportLockUntil: null }, { supportLockUntil: { lt: now } }] },
     data: { supportLockUntil: new Date(now.getTime() + 5 * 60 * 1000) },
   });
-  if (lock.count === 0) return { fetched: 0, handled: 0, autoSent: 0, forTeam: 0, notCustomers: 0, message: "A check is already running" };
+  if (lock.count === 0) return { fetched: 0, handled: 0, ready: 0, needDecision: 0, notCustomers: 0, message: "A check is already running" };
 
   const log = await db.syncLog.create({ data: { source: "support", status: "running", storeId } });
-  const out: SupportRunResult = { fetched: 0, handled: 0, autoSent: 0, forTeam: 0, notCustomers: 0, message: "" };
+  const out: SupportRunResult = { fetched: 0, handled: 0, ready: 0, needDecision: 0, notCustomers: 0, message: "" };
   try {
     await ensureKnowledgeBase(storeId);
     // A run cut off by the hosting time limit leaves claimed but unanswered emails: release them.
@@ -285,18 +261,18 @@ export async function runSupport(storeId: string, opts: { budgetMs?: number } = 
     const threadIds = [...new Set(pending.map((p) => p.threadId))];
     for (let i = 0; i < threadIds.length; i += 3) {
       if (Date.now() - started > budget) break;
-      const results = await Promise.all(threadIds.slice(i, i + 3).map((id) => handleThread(cfg, id, articles)));
+      const results = await Promise.all(threadIds.slice(i, i + 3).map((id) => handleThread(id, articles)));
       for (const r of results) {
         if (r === "retry") continue;
         out.handled++;
-        if (r === "sent") out.autoSent++;
-        else if (r === "team") out.forTeam++;
+        if (r === "ready") out.ready++;
+        else if (r === "decide") out.needDecision++;
         else out.notCustomers++;
       }
       if (results.includes("retry")) break; // the AI is rate limited or down: try again next run
     }
     const left = threadIds.length - out.handled;
-    out.message = `${out.fetched} new email${out.fetched === 1 ? "" : "s"}; ${out.autoSent} answered by AI, ${out.forTeam} for the team, ${out.notCustomers} not customers${left > 0 ? `; ${left} waiting for the next check` : ""}`;
+    out.message = `${out.fetched} new email${out.fetched === 1 ? "" : "s"}; ${out.ready} drafts ready to send, ${out.needDecision} needing a decision, ${out.notCustomers} not customers${left > 0 ? `; ${left} waiting for the next check` : ""}`;
     await db.syncLog.update({ where: { id: log.id }, data: { status: "success", message: out.message, records: out.fetched, finishedAt: new Date() } });
     return out;
   } catch (err) {

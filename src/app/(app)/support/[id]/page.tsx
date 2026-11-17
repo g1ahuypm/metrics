@@ -48,7 +48,7 @@ export default async function SupportThreadPage({ params }: { params: Promise<{ 
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: store.color }} aria-hidden="true" />
             {store.name}
           </span>
-          <StatusBadge status={thread.status} category={thread.category} />
+          <StatusBadge status={thread.status} category={thread.category} draftReady={Boolean(thread.draft) && !thread.holdReason} />
           <TodoBadges onTodo={Boolean(thread.todoAt)} urgent={thread.urgent} />
           {article && <span className="badge">{article.title}</span>}
         </div>
@@ -79,6 +79,8 @@ export default async function SupportThreadPage({ params }: { params: Promise<{ 
             draft={thread.draft}
             blank={blank}
             holdReason={thread.status === "needs_reply" ? thread.holdReason : null}
+            draftReady={thread.status === "needs_reply" && Boolean(thread.draft) && !thread.holdReason}
+            afterSending={thread.status === "needs_reply" ? thread.actionNote : null}
             actionNote={thread.status === "needs_action" ? thread.actionNote : null}
             todo={
               thread.todoAt

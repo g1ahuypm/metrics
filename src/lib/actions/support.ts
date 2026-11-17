@@ -7,8 +7,11 @@ import { decrypt, encrypt } from "../crypto";
 import { requireEditor, requireSupport, type SessionUser } from "../auth";
 import { canSeeStore, getStoreScope } from "../stores";
 import { getMailConfig, mailServers, testMailbox } from "../support/mail";
-import { decideThread, runSupport, sendThreadReply, withSignature } from "../support/run";
+import { decideThread, decisionNeeded, runSupport, sendThreadReply, withSignature } from "../support/run";
 import { OFF_TODO } from "../support/todo";
+import { runTest, type TestCase, type TestOutcome } from "../support/aitest";
+import { FIXTURES } from "../support/fixtures";
+import { findOrders } from "../support/orders";
 import type { FormState } from "./auth";
 
 const STATUSES = ["new", "auto_replied", "needs_reply", "needs_action", "replied", "done"] as const;
@@ -46,14 +49,24 @@ export async function sendSupportReplyAction(threadId: string, text: string): Pr
 export async function draftWithAiAction(threadId: string): Promise<FormState & { draft?: string }> {
   const me = await requireSupport();
   if (!(await threadStore(me, threadId))) return { error: "This email is not in a store you can see" };
-  const { thread, settings, result } = await decideThread(threadId);
+  const { thread, settings, kb, result } = await decideThread(threadId);
   if (!result.ok) return { error: result.error };
   const d = result.decision;
   if (!d.reply.trim()) return { error: "The AI thinks this is not a customer email, so it wrote nothing. Write the reply yourself if it is." };
   const draft = withSignature(d.reply, settings);
+  const article = kb.find((a) => a.key === d.topic);
+  const waiting = thread.status === "needs_reply" || thread.status === "new";
   await db.supportThread.update({
     where: { id: thread.id },
-    data: { draft, summary: d.summary, topic: d.topic === "none" ? null : d.topic, category: "customer", ...(d.upset ? { urgent: true } : {}) },
+    data: {
+      draft,
+      summary: d.summary,
+      topic: article?.key ?? null,
+      category: "customer",
+      ...(d.upset ? { urgent: true } : {}),
+      // Only for an email still waiting for an answer: the label and team note follow the new draft.
+      ...(waiting ? { holdReason: thread.holdReason?.startsWith("Arrived before Support") ? thread.holdReason : decisionNeeded(d, article), actionNote: d.teamAction.trim() || (article?.flagForTeam ? d.summary : "") || null } : {}),
+    },
   });
   revalidatePath("/support", "layout");
   return { success: "Draft ready", draft };
@@ -176,7 +189,6 @@ export async function saveSupportSettingsAction(storeId: string, _prev: FormStat
   await requireEditor();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "").replace(/\s+/g, "");
-  const autoReply = formData.get("autoReply") === "on";
   const signature = String(formData.get("signature") ?? "").trim();
   const about = String(formData.get("about") ?? "").trim().slice(0, 300);
   if (!z.string().email().safeParse(email).success) return { error: "Enter the support Gmail address" };
@@ -198,11 +210,55 @@ export async function saveSupportSettingsAction(storeId: string, _prev: FormStat
       ...(password ? { supportAppPassword: encrypt(password) } : {}),
       // A different mailbox starts fresh from its last 14 days.
       ...(email !== current?.supportEmail ? { supportUidValidity: null, supportLastUid: null } : {}),
-      supportAutoReply: autoReply,
+      // The AI never sends by itself (owner's rule, Nov 2026); the column stays only for older data.
+      supportAutoReply: false,
       supportSignature: signature || null,
       supportAbout: about || null,
     },
   });
   revalidatePath("/", "layout");
   return { success: "Connected. New emails are checked every few minutes." };
+}
+
+// ---------------------------------------------------------------------------
+// Test the AI (owner and admins): runs an email through the AI, stores and sends nothing
+// ---------------------------------------------------------------------------
+
+const customTestSchema = z.object({
+  name: z.string().trim().max(100),
+  email: z.string().trim().toLowerCase().email("Enter the customer's email address"),
+  subject: z.string().trim().max(200),
+  earlier: z.string().trim().max(5000),
+  message: z.string().trim().min(2, "Paste the customer's email").max(8000),
+  realOrders: z.boolean(),
+});
+
+export type AiTestResult = { error?: string; current?: TestOutcome; previous?: TestOutcome };
+
+export async function runAiTestAction(
+  storeId: string,
+  input: { fixtureId: string } | { custom: z.infer<typeof customTestSchema> },
+  compare: boolean,
+): Promise<AiTestResult> {
+  const me = await requireEditor();
+  if (!(await canSeeStore(me, storeId))) return { error: "Pick a store you can see" };
+  let tc: TestCase;
+  if ("fixtureId" in input) {
+    const f = FIXTURES.find((x) => x.id === input.fixtureId);
+    if (!f) return { error: "Unknown test" };
+    tc = f;
+  } else {
+    const parsed = customTestSchema.safeParse(input.custom);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the email" };
+    const c = parsed.data;
+    const now = Date.now();
+    const thread = [
+      ...(c.earlier ? [{ direction: "in" as const, sentAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(), text: c.earlier }] : []),
+      { direction: "in" as const, sentAt: new Date(now).toISOString(), text: c.message },
+    ];
+    const found = c.realOrders ? await findOrders(storeId, c.email, `${c.subject}\n${c.earlier}\n${c.message}`) : { orders: [], unmatched: [] };
+    tc = { customerName: c.name || null, customerEmail: c.email, subject: c.subject || "(no subject)", thread, orders: found.orders, unmatched: found.unmatched, today: new Date(now).toISOString().slice(0, 10) };
+  }
+  const [current, previous] = await Promise.all([runTest(storeId, tc, "current"), compare ? runTest(storeId, tc, "previous") : Promise.resolve(undefined)]);
+  return { current, previous };
 }

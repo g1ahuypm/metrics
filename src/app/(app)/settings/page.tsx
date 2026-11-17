@@ -132,7 +132,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               about={store.supportAbout}
               email={store.supportEmail}
               connected={Boolean(store.supportEmail && store.supportAppPassword)}
-              autoReply={store.supportAutoReply}
               signature={store.supportSignature}
               defaultSignature={firstStore ? DEFAULT_SIGNATURE : defaultSignature(store.name)}
               aiReady={Boolean(process.env.ANTHROPIC_API_KEY)}

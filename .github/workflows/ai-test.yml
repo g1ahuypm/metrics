@@ -1,0 +1,38 @@
+# Runs the standard support-AI test emails (made-up customers; nothing is stored or sent)
+# against the live app and prints the AI's decisions and drafts. Start it by hand.
+# Needs the repository secret CRON_SECRET (the same value as in Vercel).
+name: Test support AI
+
+on:
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: "Test numbers, separated by spaces"
+        default: "01 02 03 04 05 06 07 08 09 10 11 12"
+      compare:
+        description: "Also run the previous instructions (1 = yes)"
+        default: "1"
+      store:
+        description: "Store name (empty = the first store)"
+        default: ""
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Run the test emails
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://metrics-azure.vercel.app' }}
+          CASES: ${{ inputs.cases }}
+          COMPARE: ${{ inputs.compare }}
+          STORE: ${{ inputs.store }}
+        run: |
+          SECRET="$(printf '%s' "$CRON_SECRET" | tr -d '[:space:]')"
+          for c in $CASES; do
+            echo "::group::Test $c"
+            curl -sS --max-time 90 -G -H "Authorization: Bearer $SECRET" "$APP_URL/api/cron/ai-test" \
+              --data-urlencode "case=$c" --data-urlencode "compare=$([ "$COMPARE" = "1" ] && echo 1)" --data-urlencode "store=$STORE" | jq . || true
+            echo "::endgroup::"
+          done

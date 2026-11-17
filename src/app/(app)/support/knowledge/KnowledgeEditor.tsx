@@ -53,7 +53,7 @@ function ArticleCard({ storeId, article, startOpen = false, onCancel }: { storeI
           <span className="block truncate text-sm font-medium">{a.title || "New topic"}</span>
           <span className="block truncate text-xs text-ink-3">{a.whenToUse}</span>
         </span>
-        <span className={`badge shrink-0 ${a.autoSend ? "text-good-text" : "text-ink-3"}`}>{a.autoSend ? "AI sends" : "Person answers"}</span>
+        <span className={`badge shrink-0 ${a.autoSend ? "text-good-text" : "text-ink-3"}`}>{a.autoSend ? "Draft can be ready" : "Always checked"}</span>
         {a.flagForTeam && <span className="badge hidden shrink-0 text-accent sm:inline-flex">Team acts</span>}
       </button>
       {open && (
@@ -73,13 +73,14 @@ function ArticleCard({ storeId, article, startOpen = false, onCancel }: { storeI
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" className="mt-0.5" checked={a.autoSend} onChange={(e) => setA({ ...a, autoSend: e.target.checked })} />
             <span>
-              <strong className="font-medium">Send on its own.</strong> <span className="text-ink-2">When the AI is sure, it replies without waiting for a person.</span>
+              <strong className="font-medium">Drafts can be marked ready.</strong>{" "}
+              <span className="text-ink-2">When the AI is sure, its draft is marked &quot;Draft ready&quot;. Turn off for topics where a person should always check the facts. The AI never sends by itself.</span>
             </span>
           </label>
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" className="mt-0.5" checked={a.flagForTeam} onChange={(e) => setA({ ...a, flagForTeam: e.target.checked })} />
             <span>
-              <strong className="font-medium">The team must act.</strong> <span className="text-ink-2">After replying, the email stays in "Needs you" until someone does the work (refund, address change).</span>
+              <strong className="font-medium">The team must act.</strong> <span className="text-ink-2">After the reply is sent, the email stays on To do until someone does the work (refund, address change).</span>
             </span>
           </label>
           <div className="flex flex-wrap items-center gap-2">

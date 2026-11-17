@@ -7,9 +7,9 @@ const LABELS: Record<string, { label: string; tone: string }> = {
   done: { label: "Done", tone: "text-ink-3" },
 };
 
-export function StatusBadge({ status, category }: { status: string; category: string }) {
+export function StatusBadge({ status, category, draftReady = false }: { status: string; category: string; draftReady?: boolean }) {
   if (category === "other") return <span className="badge text-ink-3">Not a customer</span>;
-  const s = LABELS[status] ?? LABELS.new;
+  const s = status === "needs_reply" && draftReady ? { label: "Draft ready", tone: "text-good-text" } : LABELS[status] ?? LABELS.new;
   return (
     <span className={`badge ${s.tone}`}>
       <span className="h-1.5 w-1.5 rounded-full bg-current" />

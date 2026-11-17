@@ -12,7 +12,6 @@ export function SupportSettingsCard({
   about,
   email,
   connected,
-  autoReply,
   signature,
   defaultSignature,
   aiReady,
@@ -23,7 +22,6 @@ export function SupportSettingsCard({
   about: string | null;
   email: string | null;
   connected: boolean;
-  autoReply: boolean;
   signature: string | null;
   defaultSignature: string;
   aiReady: boolean;
@@ -33,7 +31,6 @@ export function SupportSettingsCard({
   // Controlled, so a failed attempt doesn't reset what was typed (forms reset after every action).
   const [address, setAddress] = useState(email ?? "");
   const [what, setWhat] = useState(about ?? "");
-  const [auto, setAuto] = useState(autoReply);
   const [sig, setSig] = useState(signature ?? defaultSignature);
   return (
     <div id="support" className="card min-w-0 scroll-mt-4 p-4">
@@ -71,15 +68,10 @@ export function SupportSettingsCard({
               placeholder={connected ? "Saved. Paste a new one only to replace it" : "16 letters, e.g. abcd efgh ijkl mnop"}
             />
           </div>
-          <label className="flex items-start gap-2 text-sm">
-            <input type="checkbox" name="autoReply" className="mt-0.5" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-            <span>
-              <strong className="font-medium">AI replies on its own.</strong>{" "}
-              <span className="text-ink-2">
-                When it is sure and the topic allows it. Angry customers, chargebacks and anything unusual always wait for a person.
-              </span>
-            </span>
-          </label>
+<p className="rounded-xl bg-surface-2 px-3 py-2 text-sm text-ink-2">
+            <strong className="font-medium text-ink">The AI never sends by itself.</strong> It writes a draft for every customer email; someone on
+            your team checks it and clicks Send.
+          </p>
           <div>
             <label className="label" htmlFor="support-about">What the store sells (one line, for the AI)</label>
             <input
