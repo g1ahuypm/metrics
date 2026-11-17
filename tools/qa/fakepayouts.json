@@ -1,0 +1,178 @@
+[
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90000",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-08-08T13:00:00.000Z",
+  "status": "PAID",
+  "net": 900,
+  "bankDate": "2026-08-10"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90001",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-08-12T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1078.37,
+  "bankDate": "2026-08-14"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90002",
+  "store": "store2",
+  "issuedAt": "2026-08-16T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1256.74,
+  "bankDate": "2026-08-18"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90003",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-08-20T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1311,
+  "bankDate": "2026-08-22"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90004",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-08-24T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1489.37,
+  "bankDate": "2026-08-26"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90005",
+  "store": "store2",
+  "issuedAt": "2026-08-28T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1067.74,
+  "bankDate": "2026-08-30"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90006",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-09-01T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1122,
+  "bankDate": "2026-09-03"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90007",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-09-05T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1300.37,
+  "bankDate": "2026-09-07"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90008",
+  "store": "store2",
+  "issuedAt": "2026-09-09T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1478.74,
+  "bankDate": "2026-09-11"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90009",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-09-13T13:00:00.000Z",
+  "status": "PAID",
+  "net": 933,
+  "bankDate": "2026-09-15"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90010",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-09-17T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1111.37,
+  "bankDate": "2026-09-19"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90011",
+  "store": "store2",
+  "issuedAt": "2026-09-21T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1289.74,
+  "bankDate": "2026-09-23"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90012",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-09-25T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1344,
+  "bankDate": "2026-09-27"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90013",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-09-29T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1522.37,
+  "bankDate": "2026-10-01"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90014",
+  "store": "store2",
+  "issuedAt": "2026-10-03T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1100.74,
+  "bankDate": "2026-10-05"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90015",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-10-07T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1155,
+  "bankDate": "2026-10-09"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90016",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-10-11T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1333.37,
+  "bankDate": "2026-10-13"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90017",
+  "store": "store2",
+  "issuedAt": "2026-10-15T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1511.74,
+  "bankDate": "2026-10-17"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90018",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-10-19T13:00:00.000Z",
+  "status": "PAID",
+  "net": 966,
+  "bankDate": "2026-10-21"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90019",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-10-23T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1144.37,
+  "bankDate": "2026-10-25"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90020",
+  "store": "store2",
+  "issuedAt": "2026-10-27T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1322.74,
+  "bankDate": "2026-10-29"
+ },
+ {
+  "id": "gid://shopify/ShopifyPaymentsPayout/90021",
+  "store": "FIRST_STORE_ID",
+  "issuedAt": "2026-10-31T13:00:00.000Z",
+  "status": "PAID",
+  "net": 1377,
+  "bankDate": "2026-11-02"
+ }
+]

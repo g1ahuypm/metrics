@@ -1,0 +1,1 @@
+n=0; d=0; for f in before/*.txt; do n=$((n+1)); if ! cmp -s <(tr ' ' '\n' < $f | sort) <(tr ' ' '\n' < after/$(basename $f) | sort); then d=$((d+1)); echo "DIFF $(basename $f)"; fi; done; echo "$n pages compared, $d differ"

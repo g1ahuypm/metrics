@@ -1,54 +1,120 @@
-# ProfitDeck — handoff for continuing work
+# Margin (formerly ProfitDeck) — handoff for continuing work
 
-Read this whole file before touching code. It is the state of the project and the
-owner's expectations as of the last session.
+Read this whole file before touching code. It is the state of the project, how the owner wants to work,
+and what is open, as of the last session (Nov 17, 2026). Sections after "START HERE" are history, newest first.
 
-## NOW (Nov 4, 2026) — start here
+## START HERE (Nov 17, 2026)
 
-Live (head of `claude/ecommerce-metrics-dashboard-ujpiqd`), owner-approved:
-- Support AI answers on its own (owner's real tests Oct 21: first reply held because the store's
-  "AI replies on its own" switch was off; after turning it on, the second test was answered automatically).
-  KB "Where is my order" updated with the "search Spam/Promotions for the confirmation email" line.
-- Speed (Oct 21): one-query session lookup, request-level caching of stores/scope/store revenue
-  (React cache), layout queries in parallel, Shopify/Meta sync moved to the GitHub check (step "Bring in new
-  orders and ad spend", /api/cron/sync); on-visit sync only after 3 h.
-- Store switch fix: page content keyed by store (AppShell `<Fragment key>`), Settings cards keyed by store id.
-- Store access: only the OWNER sees "All stores", ticks member stores and creates invites.
-- Alara Official (2nd store) has Shopify connected (syncing). Still to do for it: product costs per country,
-  ad-account ticks, support Gmail + app password, its KB (topics start with auto-send off).
+### Who you work for, and how
+- Owner: Huy, CEO of LearnWell Co. Not technical. Wants plain language, short answers, exact click-by-click
+  steps when they must do something, and an app that feels like a real profit tool. Blunt; expects full effort.
+- The owner's rules, as given: verify against real data; test every change in a browser before pushing;
+  one task at a time; plain language with step-by-step instructions; never ask them to paste secrets in chat
+  (keys go into Vercel or the app's own Settings only).
+- Workflow: develop on this session's own branch, test locally (see `tools/qa/README.md`), show screenshots,
+  and deploy ONLY when the owner says so ("deploy", "deploy both", "deploy fix"), by fast-forwarding
+  `claude/ecommerce-metrics-dashboard-ujpiqd` (every push to it auto-deploys on Vercel). After a deploy, wait
+  ~3 min, trigger the GitHub workflow "Check support inbox" (workflow_dispatch) and read its log to confirm.
+- The sandbox cannot open the live site (https://metrics-azure.vercel.app), Plaid, or the stores with the
+  app's keys. The owner sends screenshots of the live app; the workflow log is the other window on production.
+- Owner preference: before answering marketing / ecommerce / sales / ads / funnels / copywriting questions,
+  search the dtcpill knowledge base (MCP "DTCPill", `search_knowledge`) and cite it ("Source: <title> — dtcpill").
+- The claude.ai Shopify connector (read-only GraphQL) works for real-data checks; it may be signed in to a
+  different store, so check `get-shop-info` first (it was LearnWell on Nov 4).
+- Never write personal financial details (account endings, balances) or personal emails into the repo.
 
-On branch `claude/stoic-dijkstra-rtla59`, tested, NOT deployed yet (waiting for the owner's OK):
-1. **Fix for frozen pages** — the speed work's `(app)/loading.tsx` and `experimental.staleTimes` broke
-   same-page updates in Next 15.5 (router.refresh stopped updating; on big pages a 2nd save in a row left the
-   screen frozen until another update). Both removed; `NavProgress` gives instant click feedback instead
-   (menu item lights up + top bar). Do NOT re-add loading.tsx/staleTimes without re-running the
-   "four saves in a row" test.
-2. **Cash page (owner only)** — bank through Plaid (owner chose Plaid; bank: Citizens US, USD, account mixed
-   with personal spending, Meta/suppliers paid by debit card). `src/lib/cash/*`, `src/app/(app)/cash/*`,
-   `src/lib/actions/cash.ts`. Balance split that always adds up: opening (balance before the first
-   transaction) + business cash profit + owner money (put in / personal) + transfers + not sorted.
-   Auto-sort: Shopify in = payout, Shopify out = bill, FACEBK/Meta = ads, Plaid account transfers/bank fees;
-   everything else waits for the owner (mixed personal account); "Always do this" makes a CashRule.
-   Payout deposits are matched to Shopify payouts (same amount, 0–5 days) to know the store.
-   Shopify payouts need scopes `read_shopify_payments_accounts` + `read_shopify_payments_payouts` on each
-   store's Dev Dashboard app (otherwise a note on the Cash page). Bank sync runs in /api/cron/sync after
-   Shopify (a bank needing re-login doesn't fail the check) and on "Refresh".
-   Env needed in Vercel: PLAID_CLIENT_ID, PLAID_SECRET (Production), PLAID_ENV=production. Plaid Trial is free
-   up to 10 Items; Citizens isn't in Plaid's public trial list — confirm under OAuth institutions in the Plaid
-   dashboard. Tested only against a local Plaid stand-in (sandbox can't reach Plaid): connect, two-page
-   history, pending→posted keeps category, removed/modified lines, rules, re-login (update mode), every
-   figure checked against independently computed totals.
-Nov 4, first live bank data: the bank describes most Shopify payouts without the word "Shopify" and Plaid
-calls them account transfers, so they sat under "Between your own accounts". Fix on branch: a transfer counts
-as between own accounts only with its opposite half in another counted account (within 3 days); deposits are
-matched to Shopify payouts by amount (needs the payout scopes). Open question for the owner: the bank's
-"current" vs "available" balance, since "Already in the account" came out negative (pending charges may
-already be inside the bank's current balance). Many small bank-fee lines were flagged to the owner.
-Other notes: GitHub's "every 5 minutes" schedule really runs every 30 min – 3 h; offered the owner a free
-external timer (cron-job.org) — not set up yet. Intermittent React #418 on /orders not reproducible (likely
-a browser extension).
+### Live now (deploy branch head `dbdedf1`)
+- Everything in the history below, plus (Oct 21 – Nov 4):
+- Support AI auto-replies for LearnWell (owner's real tests passed; the store switch "AI replies on its own" was
+  off at first and is now on). KB "Where is my order" has the "search Spam/Promotions for the confirmation email"
+  line. "Questions about a book" still empty: owner will send book facts later.
+- Speed: one-query session lookup, React `cache()` for stores / store access / store revenue per page load,
+  layout queries in parallel, Shopify + Meta (+ bank) sync in the GitHub check (step "Bring in new orders and
+  ad spend" → `/api/cron/sync`), on-visit sync only after 3 h.
+- Instant click feedback: `src/components/NavProgress.tsx` (menu item lights up + thin top bar, capture-phase
+  click listener, hides after 10 s). There is NO `loading.tsx` and NO `experimental.staleTimes` (see Lessons).
+- Store switch: page content keyed by store (`<Fragment key>` in AppShell), Settings cards keyed by store id.
+- Store access: only the OWNER sees "All stores", ticks member stores (Team page) and creates invites.
+- Two stores: LearnWell (rtnvmy-5d.myshopify.com, Dev Dashboard app "MetricsDeck") and Alara Official (its own
+  app; Shopify connected and syncing).
+- **Cash page** (owner only, `/cash`): bank through Plaid + Shopify payouts. Owner's Plaid Trial is active
+  (20 connections); PLAID_CLIENT_ID / PLAID_SECRET (Production) / PLAID_ENV=production are set in Vercel;
+  Citizens Bank is connected (2 accounts: a savings and a checking; ~1,075 transactions back to Aug 2025).
+  Transfers count as "between your own accounts" only in pairs; deposits are matched to Shopify payouts by
+  amount; each account shows "available" when it differs from the bank balance.
 
-## Earlier (Oct 21, 2026)
+### On branch `claude/stoic-dijkstra-rtla59`, NOT deployed
+- `7b3c888` Payouts: when Shopify refuses payouts, fetch a fresh app key once (new scopes only reach a new key;
+  keys are cached up to 24 h), and page back through older payouts (until already-stored settled ones, or
+  ~15 months, max 600) so deposits across the whole bank history can match. Tested with a Shopify stand-in.
+  Waiting for the owner's "deploy".
+- This handoff and `tools/qa/` (the local test kit; not deployed by Next).
+
+### Open items, in order
+1. **Deploy `7b3c888`** when the owner says "deploy".
+2. **Shopify payout permissions.** Each store's Dev Dashboard app needs `read_shopify_payments_accounts` and
+   `read_shopify_payments_payouts`: app → Versions → **Create version** → keep the existing scopes
+   (read_orders, read_products, read_inventory, read_customers) and add the two → Release → approve the update in
+   the store (Overview → Installs card, or the store admin's Apps settings). Status unknown: the owner said the
+   Cash page still showed 4 payouts (before `7b3c888`). Confirm via the "Money still with Shopify" box: the
+   "Payouts need two more permissions" note disappears once it works. Do it for LearnWell and Alara Official.
+3. **Checking balance.** The bank's app shows, for checking, current $X and available $Y with the difference =
+   holds; Plaid's `current` for checking equals the bank's AVAILABLE number (savings: both equal). The full
+   history + pending transactions adds up EXACTLY to the bank app's current balances from a $0 start, so the
+   history is complete; "Already in the account" shows a large negative only because the balance used is the
+   hold-adjusted one. Next step: owner sends a screenshot of the "In your bank now" box (now showing both Plaid
+   numbers per account); then fix `getCashReport` (`src/lib/cash/report.ts`) to use the right balance per account
+   and to include pending lines consistently, so opening ≈ $0 and the split adds up.
+4. After payouts match: owner sorts what's left in "Not sorted" using "Always do this for …" (aim for 15–25 rules).
+   Tell them NOT to hand-sort before payouts match.
+5. Bank fees: over 100 small fee lines in 90 days were flagged to the owner (a few thousand dollars a year at
+   that pace); likely foreign-transaction or overdraft fees. Help them find which and how to avoid them.
+6. Alara Official: product costs per country, tick it on the Meta ad account(s) in Settings, support Gmail +
+   app password + "what the store sells" line, rewrite its KB from its policies (topics start with auto-send OFF).
+7. LearnWell KB "Questions about a book" (facts from the owner), review "The offer".
+8. GitHub's "every 5 minutes" schedule actually runs every 30 min – 3 h. Offered: a free external timer
+   (cron-job.org) calling /api/cron/support (and /sync) with the CRON_SECRET header (owner pastes it there, not
+   in chat). Not set up.
+9. Advise rotating secrets pasted in very early chats (Shopify client secrets, Neon password).
+10. Not reproduced: intermittent React #418 on /orders (likely a browser extension).
+
+### Cash page reference (`src/lib/cash/*`, `src/app/(app)/cash/*`, `src/lib/actions/cash.ts`)
+- Tables: BankConnection (Plaid item, encrypted access token, sync cursor), BankAccount (`included` = counted),
+  BankTransaction (amount > 0 = money in; Plaid's sign is the opposite; `categorySource` auto | rule | you;
+  `payoutId` when matched), CashRule (match text + direction → category, made by "Always do this"),
+  ShopifyPayout. Store has shopifyBalance / shopifyPayoutsNote.
+- Split (always adds up): opening (balance minus every posted line) + business cash profit + owner money
+  (OWNER_IN, PERSONAL) + transfers + not sorted = bank balance. Pending lines are listed but not counted.
+- Auto-sort only when certain: "shopify" in → payout, out → Shopify bill; FACEBK/Meta out → Meta ads; Plaid
+  BANK_FEES → bank fees. Everything else UNSORTED (the account is mixed with personal spending).
+  `matchTransfers()` pairs opposite account transfers across counted accounts (≤3 days). `matchPayouts()`
+  matches deposits (already-payouts or automatic unsorted) to PAID payouts: same amount to the cent, bank date
+  0–5 days after issue; sets category + store. The owner's own choices are never overwritten.
+- Plaid calls: plain fetch (`plaid.ts`); PLAID_BASE_URL overrides the host for tests. Link opens in the browser
+  (script from cdn.plaid.com); re-login uses update mode. A bank needing re-login shows a yellow banner and does
+  not fail the scheduled check.
+- Chart colours `--cash-in` / `--cash-out` passed the dataviz validator (light and dark).
+
+### Lessons (read before changing these areas)
+- **Never add `loading.tsx` or `experimental.staleTimes` again without the "several saves in a row" test**
+  (`tools/qa/tog2.mjs`, `exp2.mjs`). With Next 15.5.25 (also 15.5.29) they froze pages: router.refresh stopped
+  updating, and on bigger pages a second save in a row left the screen stale until another update. This was
+  live Oct 21 – Nov 4 and fixed by removing both.
+- Don't call `router.refresh()` right after a server action that already calls `revalidatePath`; the two race
+  and the browser cancels both.
+- Controlled checkboxes that save on change: Playwright needs `.click()`, not `.check()`.
+- Shopify Dev Dashboard app keys (client credentials) are cached up to 24 h; new scopes need a new key.
+- The Shopify connector validates queries against the real schema: an "Access denied" error means the query
+  itself is valid.
+- Every push to any branch may make a Vercel preview build, and the build runs
+  `prisma db push --accept-data-loss`; keep schema changes additive (unverified whether previews share the
+  production DATABASE_URL — assume they might).
+- The sandbox stops background processes (Postgres, servers) from time to time: `tools/qa/up.sh`.
+- `pkill -f "next start"` kills the shell running it; kill by PID (see the QA README).
+- Auto-mode may refuse a commit that writes personal data into the repo, and has once misfired on a plain file
+  read right after a deploy push; use the Read tool then.
+
+## History: Oct 21, 2026 (superseded by START HERE)
 
 Live at https://metrics-azure.vercel.app, all owner-approved and deployed (head of
 `claude/ecommerce-metrics-dashboard-ujpiqd`):
@@ -78,7 +144,7 @@ checked to the cent), shows the owner screenshots, and deploys only after he say
 `claude/ecommerce-metrics-dashboard-ujpiqd`. The live site can't be fetched from the sandbox (proxy 403);
 verify deploys through the GitHub Actions logs of the 5-minute check.
 
-## WHERE WE LEFT OFF (latest session, Oct 19, 2026) — read this first
+## History: Oct 19–20, 2026
 
 Oct 20 (later): **Multi-store** built on `claude/eager-cray-sncji0`, tested, owner approved, DEPLOYED
 (live cron reports `{"stores":{"LearnWell":…}}` and logs into Gmail, so the one-time move worked).
