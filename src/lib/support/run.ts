@@ -4,6 +4,7 @@ import { decide, type Article, type SupportDecision } from "./ai";
 import { defaultSignature, ensureKnowledgeBase } from "./knowledge";
 import { fetchNewMail, getMailConfig, sendMail, type IncomingMail, type MailConfig } from "./mail";
 import { findOrders, orderNumbersIn } from "./orders";
+import { OFF_TODO } from "./todo";
 
 const senderName = (store: { name: string }) => `${store.name} Customer Care`;
 /** Safety limits on replies the AI sends by itself. */
@@ -52,7 +53,8 @@ async function storeIncoming(storeId: string, mail: IncomingMail, history: boole
       data: {
         lastMessageAt: mail.sentAt > thread.lastMessageAt ? mail.sentAt : thread.lastMessageAt,
         unread: true,
-        ...(reopen ? { status: "new", draft: null, holdReason: null } : {}),
+        // A new customer message restarts the "opened but not answered" clock.
+        ...(reopen ? { status: "new", draft: null, holdReason: null, openedAt: null, openedById: null } : {}),
       },
     });
   }
@@ -221,14 +223,17 @@ async function handleThread(cfg: MailConfig, threadId: string, articles: Awaited
       await sendThreadReply(cfg, threadId, text, "AI");
       await db.supportThread.update({
         where: { id: threadId },
-        data: { ...base, status: actionNote ? "needs_action" : "auto_replied", draft: null, holdReason: null },
+        data: { ...base, status: actionNote ? "needs_action" : "auto_replied", draft: null, holdReason: null, ...(thread.todoAuto ? OFF_TODO : {}) },
       });
       return "sent";
     } catch (err) {
       reason = `Sending failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
     }
   }
-  await db.supportThread.update({ where: { id: threadId }, data: { ...base, status: "needs_reply", draft: text, holdReason: reason } });
+  // A clearly upset customer goes straight onto the team's To do list, marked urgent (reminders until
+  // answered). Not for mail from before Support was connected: it may already be answered in Gmail.
+  const upset = d.upset && !onlyHistory ? { urgent: true, ...(thread.todoAt ? {} : { todoAt: new Date(), todoAuto: true }) } : {};
+  await db.supportThread.update({ where: { id: threadId }, data: { ...base, status: "needs_reply", draft: text, holdReason: reason, ...upset } });
   return "team";
 }
 

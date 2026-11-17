@@ -8,6 +8,7 @@ import { requireEditor, requireSupport, type SessionUser } from "../auth";
 import { canSeeStore, getStoreScope } from "../stores";
 import { getMailConfig, mailServers, testMailbox } from "../support/mail";
 import { decideThread, runSupport, sendThreadReply, withSignature } from "../support/run";
+import { OFF_TODO } from "../support/todo";
 import type { FormState } from "./auth";
 
 const STATUSES = ["new", "auto_replied", "needs_reply", "needs_action", "replied", "done"] as const;
@@ -34,7 +35,8 @@ export async function sendSupportReplyAction(threadId: string, text: string): Pr
   const thread = await db.supportThread.findUnique({ where: { id: threadId }, select: { actionNote: true } });
   await db.supportThread.update({
     where: { id: threadId },
-    data: { status: thread?.actionNote ? "needs_action" : "replied", draft: null, holdReason: null, category: "customer", unread: false },
+    // Answered by a person: off the To do list.
+    data: { status: thread?.actionNote ? "needs_action" : "replied", draft: null, holdReason: null, category: "customer", unread: false, ...OFF_TODO },
   });
   revalidatePath("/support", "layout");
   return { success: "Sent" };
@@ -51,7 +53,7 @@ export async function draftWithAiAction(threadId: string): Promise<FormState & {
   const draft = withSignature(d.reply, settings);
   await db.supportThread.update({
     where: { id: thread.id },
-    data: { draft, summary: d.summary, topic: d.topic === "none" ? null : d.topic, category: "customer" },
+    data: { draft, summary: d.summary, topic: d.topic === "none" ? null : d.topic, category: "customer", ...(d.upset ? { urgent: true } : {}) },
   });
   revalidatePath("/support", "layout");
   return { success: "Draft ready", draft };
@@ -60,7 +62,7 @@ export async function draftWithAiAction(threadId: string): Promise<FormState & {
 export async function setThreadStatusAction(threadId: string, status: string): Promise<void> {
   const me = await requireSupport();
   if (!(STATUSES as readonly string[]).includes(status) || !(await threadStore(me, threadId))) return;
-  await db.supportThread.update({ where: { id: threadId }, data: { status, ...(status === "done" ? { actionNote: null } : {}) } });
+  await db.supportThread.update({ where: { id: threadId }, data: { status, ...(status === "done" ? { actionNote: null, ...OFF_TODO } : {}) } });
   revalidatePath("/support", "layout");
 }
 
@@ -70,8 +72,41 @@ export async function setThreadCategoryAction(threadId: string, category: "custo
   if (!(await threadStore(me, threadId))) return;
   await db.supportThread.update({
     where: { id: threadId },
-    data: category === "other" ? { category, status: "done", draft: null } : { category, status: "needs_reply", holdReason: "Moved to customers by the team" },
+    data: category === "other" ? { category, status: "done", draft: null, ...OFF_TODO } : { category, status: "needs_reply", holdReason: "Moved to customers by the team" },
   });
+  revalidatePath("/support", "layout");
+}
+
+const todoSchema = z.object({ note: z.string().trim().max(300, "Keep the note under 300 characters"), urgent: z.boolean() });
+
+/** Puts an email on the team's To do list (or updates its note), so someone comes back to it. */
+export async function saveTodoAction(threadId: string, input: z.infer<typeof todoSchema>): Promise<FormState> {
+  const me = await requireSupport();
+  const parsed = todoSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the note" };
+  if (!(await threadStore(me, threadId))) return { error: "This email is not in a store you can see" };
+  const t = await db.supportThread.findUnique({ where: { id: threadId }, select: { todoAt: true, todoAuto: true } });
+  await db.supportThread.update({
+    where: { id: threadId },
+    data: {
+      todoNote: parsed.data.note || null,
+      urgent: parsed.data.urgent,
+      // Whoever saves it owns it from now on (reminders go to them).
+      todoById: me.id,
+      todoByName: me.name,
+      ...(t?.todoAt ? {} : { todoAt: new Date() }),
+      todoAuto: false,
+    },
+  });
+  revalidatePath("/support", "layout");
+  return { success: t?.todoAt ? "To do updated" : "Added to To do" };
+}
+
+/** Takes an email off the To do list without answering it. */
+export async function removeTodoAction(threadId: string): Promise<void> {
+  const me = await requireSupport();
+  if (!(await threadStore(me, threadId))) return;
+  await db.supportThread.update({ where: { id: threadId }, data: OFF_TODO });
   revalidatePath("/support", "layout");
 }
 

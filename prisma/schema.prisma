@@ -328,6 +328,15 @@ model SupportThread {
   draft         String? // reply waiting for a person
   orderNames    String? // "#LW001289, #LW001290"
   unread        Boolean          @default(true)
+  // To do: emails the team has to come back to (one shared list per store).
+  todoAt        DateTime? // on the To do list since (null = not on it)
+  todoNote      String? // what is left to do, in the team's words
+  todoById      String? // who put it there; for "opened, not answered", who opened it
+  todoByName    String?
+  todoAuto      Boolean          @default(false) // put there automatically (upset customer, or opened and not answered for 24 h)
+  urgent        Boolean          @default(false) // clearly upset customer, or marked urgent: reminders until it is answered
+  openedAt      DateTime? // first opened by a person since the customer last wrote
+  openedById    String?
   lastMessageAt DateTime
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt

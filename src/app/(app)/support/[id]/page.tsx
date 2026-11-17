@@ -8,7 +8,8 @@ import { validTimezone } from "@/lib/scope";
 import { fmtDateTime } from "@/lib/format";
 import { findOrders } from "@/lib/support/orders";
 import { defaultSignature } from "@/lib/support/knowledge";
-import { StatusBadge } from "@/components/support/StatusBadge";
+import { StatusBadge, TodoBadges } from "@/components/support/StatusBadge";
+import { waited } from "@/lib/support/todo";
 import { ReplyPanel } from "./ReplyPanel";
 
 export default async function SupportThreadPage({ params }: { params: Promise<{ id: string }> }) {
@@ -17,7 +18,11 @@ export default async function SupportThreadPage({ params }: { params: Promise<{ 
   const thread = await db.supportThread.findUnique({ where: { id }, include: { store: true, messages: { orderBy: [{ createdAt: "asc" }, { sentAt: "asc" }] } } });
   if (!thread?.store || !(await canSeeStore(user, thread.storeId))) notFound();
   const store = thread.store;
-  if (thread.unread) await db.supportThread.update({ where: { id }, data: { unread: false } });
+  // Remember who first opened it: opened and still not answered after 24 h puts it on To do.
+  const firstOpen = !thread.openedAt && thread.category !== "other" && thread.status === "needs_reply";
+  if (thread.unread || firstOpen) {
+    await db.supportThread.update({ where: { id }, data: { unread: false, ...(firstOpen ? { openedAt: new Date(), openedById: user.id } : {}) } });
+  }
 
   const [article, { orders, unmatched }] = await Promise.all([
     thread.topic ? db.kbArticle.findUnique({ where: { storeId_key: { storeId: store.id, key: thread.topic } }, select: { title: true } }) : Promise.resolve(null),
@@ -44,6 +49,7 @@ export default async function SupportThreadPage({ params }: { params: Promise<{ 
             {store.name}
           </span>
           <StatusBadge status={thread.status} category={thread.category} />
+          <TodoBadges onTodo={Boolean(thread.todoAt)} urgent={thread.urgent} />
           {article && <span className="badge">{article.title}</span>}
         </div>
       </div>
@@ -74,6 +80,12 @@ export default async function SupportThreadPage({ params }: { params: Promise<{ 
             blank={blank}
             holdReason={thread.status === "needs_reply" ? thread.holdReason : null}
             actionNote={thread.status === "needs_action" ? thread.actionNote : null}
+            todo={
+              thread.todoAt
+                ? { note: thread.todoNote, urgent: thread.urgent, by: todoBy(thread), since: `on the list since ${fmtDateTime(thread.todoAt, tz)} (${waited(thread.todoAt)})` }
+                : null
+            }
+            urgent={thread.urgent}
           />
         </div>
 
@@ -129,4 +141,11 @@ export default async function SupportThreadPage({ params }: { params: Promise<{ 
       </div>
     </div>
   );
+}
+
+/** Who or what put the email on To do, in plain words. */
+function todoBy(t: { todoAuto: boolean; todoByName: string | null; urgent: boolean }): string {
+  if (!t.todoAuto) return `Added by ${t.todoByName ?? "the team"}`;
+  if (t.todoByName) return `Opened by ${t.todoByName}, not answered within 24 h`;
+  return t.urgent ? "Added automatically: the customer sounds upset" : "Added automatically";
 }

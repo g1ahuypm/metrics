@@ -48,9 +48,9 @@ export async function pushNotifications(items: NewNotification[]): Promise<void>
         return sendPush([userId], { title: n.title, body: n.body, url: n.href, tag: n.taskId ?? n.kind });
       }
       return sendPush([userId], {
-        title: `${list.length} task updates`,
+        title: list.every((n) => n.kind === "support_todo") ? `${list.length} urgent emails waiting` : list.some((n) => n.kind === "support_todo") ? `${list.length} updates` : `${list.length} task updates`,
         body: list.map((n) => n.title).join("\n").slice(0, 400),
-        url: "/inbox",
+        url: list.every((n) => n.kind === "support_todo") ? "/support?tab=todo" : "/inbox",
         tag: "digest",
       });
     }),

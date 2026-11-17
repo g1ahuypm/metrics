@@ -68,5 +68,17 @@ Never `pkill -f "next start"`: it matches the shell running it and kills the com
 | `cash2.mjs PHASE STEP` | Cash page end to end against `fakeplaid.js` (`echo '{"phase":1}' > fakeplaid-state.json`; steps `connect`, `sort`, then phase 2 `refresh`, or `check`): every figure compared with totals computed independently from the stand-in's raw data, parts add up to the balance, payouts matched. Set `"loginRequired": true` in the state file to test re-login. |
 | `payout-test.ts` | Shopify payouts sync against a stand-in (fetch is replaced): old cached key refused, fresh key fetched once, 3 pages saved, next run reads one page. Run from the repo root with a temporary `node_modules/server-only` stub (an empty package): `DATABASE_URL=... APP_SECRET=... npx tsx --tsconfig tsconfig.json tools/qa/payout-test.ts`, then remove the stub. |
 
+## Support inbox stand-ins (`tools/qa/support/`)
+
+A local IMAP mailbox (Dovecot), an SMTP catcher and a fake Claude API, so the whole Support pipeline runs
+end to end. `apt-get install -y dovecot-imapd`, `useradd -r -M vmail`, `mkdir -p /var/tmp/mail && chown vmail /var/tmp/mail`,
+`echo 'support@test.local:{PLAIN}abcdabcdabcdabcd' > /var/tmp/dovecot-users`, `dovecot -c "$PWD/tools/qa/support/dovecot.conf"`
+(IMAP on 1143), `node tools/qa/support/smtp.js` (2525, writes to `support/sent/`), `node tools/qa/support/fakeai.js` (7778;
+"furious"/"chargeback" → upset customer, "puzzle" → held for a person, anything else → confident auto-reply). Start the app with
+`ANTHROPIC_API_KEY=test-key ANTHROPIC_BASE_URL=http://127.0.0.1:7778 SUPPORT_IMAP_HOST=127.0.0.1 SUPPORT_IMAP_PORT=1143
+SUPPORT_IMAP_SECURE=false SUPPORT_SMTP_HOST=127.0.0.1 SUPPORT_SMTP_PORT=2525 SUPPORT_SMTP_SECURE=false`, connect
+support@test.local / abcdabcdabcdabcd in Settings, run `/api/cron/support` once (first scan), then drop emails in with
+`bash tools/qa/support/deliver.sh ID "Name" email "Subject" "Body" [<in-reply-to@id>]` and run `/api/cron/support` again.
+
 Colours for charts: run the dataviz validator before adding a categorical pair (the Cash in/out pair
 `--cash-in`/`--cash-out` in globals.css passed light and dark).

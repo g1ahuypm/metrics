@@ -17,3 +17,18 @@ export function StatusBadge({ status, category }: { status: string; category: st
     </span>
   );
 }
+
+/** "To do" and "Urgent" markers shown next to the status. */
+export function TodoBadges({ onTodo, urgent }: { onTodo: boolean; urgent: boolean }) {
+  return (
+    <>
+      {urgent && (
+        <span className="badge border-bad/40 text-bad-text">
+          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+          Urgent
+        </span>
+      )}
+      {onTodo && <span className="badge text-accent">To do</span>}
+    </>
+  );
+}

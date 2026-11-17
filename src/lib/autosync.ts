@@ -78,6 +78,8 @@ export async function maybeRemindTasks(): Promise<void> {
     try {
       const { runTaskReminders } = await import("./tasks/remind");
       await runTaskReminders();
+      const { runTodoReminders } = await import("./support/todo");
+      await runTodoReminders();
     } catch (err) {
       console.error("task reminders failed", err);
     }

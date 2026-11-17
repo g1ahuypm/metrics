@@ -17,6 +17,7 @@ const Decision = z.object({
   topic: z.string().describe("The key of the knowledge-base article that answers this email, or \"none\" if no article fits."),
   confidence: z.enum(["high", "medium", "low"]).describe("How sure you are that the reply is correct and complete using only the facts given."),
   needsPerson: z.boolean().describe("True if a person must read this before anyone replies (see the rules)."),
+  upset: z.boolean().describe("True only if the customer is clearly angry or upset, or threatens a chargeback, dispute, bad review or legal action."),
   needsPersonReason: z.string().describe("Why a person must read it, in one short sentence. Empty when needsPerson is false."),
   teamAction: z.string().describe("What the team must do after the reply (e.g. 'Send return instructions for #LW001289'). Empty if nothing."),
   summary: z.string().describe("One short sentence: what the customer wants."),

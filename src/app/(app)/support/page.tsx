@@ -8,9 +8,11 @@ import { validTimezone } from "@/lib/scope";
 import { maybeCheckSupport } from "@/lib/autosync";
 import { fmtDateTime } from "@/lib/format";
 import { SupportHeader } from "@/components/support/SupportHeader";
-import { StatusBadge } from "@/components/support/StatusBadge";
+import { StatusBadge, TodoBadges } from "@/components/support/StatusBadge";
+import { catchOpenedNotAnswered, TODO_WHERE, waited } from "@/lib/support/todo";
 
 const TABS = [
+  { key: "todo", label: "To do", where: TODO_WHERE },
   { key: "needs", label: "Needs you", where: { category: { not: "other" }, status: { in: ["new", "needs_reply", "needs_action"] } } },
   { key: "answered", label: "Answered", where: { category: "customer", status: { in: ["auto_replied", "replied"] } } },
   { key: "done", label: "Done", where: { category: { not: "other" }, status: "done" } },
@@ -20,18 +22,19 @@ const TABS = [
 export default async function SupportInboxPage({ searchParams }: { searchParams: Promise<{ tab?: string; q?: string }> }) {
   const user = await requireSupport();
   const sp = await searchParams;
-  const tab = TABS.find((t) => t.key === sp.tab) ?? TABS[0];
+  const tab = TABS.find((t) => t.key === sp.tab) ?? TABS[1];
   const q = (sp.q ?? "").trim();
   const search: Prisma.SupportThreadWhereInput = q
     ? { OR: [{ customerEmail: { contains: q, mode: "insensitive" } }, { customerName: { contains: q, mode: "insensitive" } }, { subject: { contains: q, mode: "insensitive" } }, { orderNames: { contains: q, mode: "insensitive" } }] }
     : {};
   const scope = await getStoreScope(user);
   const inScope = { storeId: { in: scope.storeIds } };
-  await maybeCheckSupport(scope.storeIds);
+  await Promise.all([maybeCheckSupport(scope.storeIds), catchOpenedNotAnswered()]);
   const [threads, counts, articles] = await Promise.all([
     db.supportThread.findMany({
       where: { ...tab.where, ...search, ...inScope },
-      orderBy: { lastMessageAt: "desc" },
+      // To do: urgent first, then whatever has waited longest.
+      orderBy: tab.key === "todo" ? [{ urgent: "desc" }, { todoAt: { sort: "asc", nulls: "last" } }, { lastMessageAt: "asc" }] : { lastMessageAt: "desc" },
       take: 200,
       include: { messages: { orderBy: { sentAt: "desc" }, take: 1, select: { text: true, direction: true } } },
     }),
@@ -79,7 +82,7 @@ export default async function SupportInboxPage({ searchParams }: { searchParams:
               className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold ${t.key === tab.key ? "bg-ink text-surface" : "text-ink-2 hover:bg-surface-2"}`}
             >
               {t.label}
-              <span className={`rounded-full px-1.5 text-[11px] ${t.key === "needs" && counts[i] > 0 ? "bg-warn/20 text-warn-text" : "bg-surface-2 text-ink-3"}`}>{counts[i]}</span>
+              <span className={`rounded-full px-1.5 text-[11px] ${t.key === tab.key ? "bg-surface/20 text-surface" : (t.key === "needs" || t.key === "todo") && counts[i] > 0 ? "bg-warn/20 text-warn-text" : "bg-surface-2 text-ink-3"}`}>{counts[i]}</span>
             </Link>
           ))}
         </nav>
@@ -105,6 +108,7 @@ export default async function SupportInboxPage({ searchParams }: { searchParams:
                 <span className="block truncate text-xs text-ink-3">{preview}</span>
                 <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <StatusBadge status={t.status} category={t.category} />
+                  <TodoBadges onTodo={Boolean(t.todoAt) && tab.key !== "todo"} urgent={t.urgent} />
                   {shown.length > 1 && t.storeId && (
                     <span className="badge">
                       <span className="h-1.5 w-1.5 rounded-full" style={{ background: storeOf.get(t.storeId)?.color }} aria-hidden="true" />
@@ -114,15 +118,27 @@ export default async function SupportInboxPage({ searchParams }: { searchParams:
                   {t.topic && <span className="badge">{topicTitle.get(`${t.storeId}:${t.topic}`) ?? t.topic}</span>}
                   {t.orderNames && <span className="badge">{t.orderNames}</span>}
                   {t.status === "needs_action" && t.actionNote && <span className="truncate text-xs text-accent">To do: {t.actionNote}</span>}
-                  {t.status === "needs_reply" && t.holdReason && <span className="truncate text-xs text-ink-3">{t.holdReason}</span>}
+                  {t.todoAt && t.todoNote && <span className="truncate text-xs text-accent">To do: {t.todoNote}</span>}
+                  {t.status === "needs_reply" && t.holdReason && !(tab.key === "todo" && t.todoAt) && <span className="truncate text-xs text-ink-3">{t.holdReason}</span>}
                 </span>
+                {tab.key === "todo" && t.todoAt && (
+                  <span className="mt-1 block text-xs text-ink-3">
+                    {t.todoAuto ? (t.todoByName ? `Opened by ${t.todoByName}, not answered` : "Added automatically: customer sounds upset") : `Added by ${t.todoByName ?? "the team"}`} · on To do for {waited(t.todoAt)}
+                  </span>
+                )}
               </span>
             </Link>
           );
         })}
         {threads.length === 0 && (
           <div className="px-4 py-10 text-center text-sm text-ink-3">
-            {q ? "Nothing matches that search." : tab.key === "needs" ? "All caught up. Nothing needs you right now." : "Nothing here yet."}
+            {q
+              ? "Nothing matches that search."
+              : tab.key === "needs"
+                ? "All caught up. Nothing needs you right now."
+                : tab.key === "todo"
+                  ? "Nothing on To do. Open an email and click To do to come back to it later."
+                  : "Nothing here yet."}
           </div>
         )}
       </div>

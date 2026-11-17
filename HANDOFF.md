@@ -50,6 +50,20 @@ and what is open, as of the last session (Nov 17, 2026). Sections after "START H
   Waiting for the owner's "deploy".
 - This handoff and `tools/qa/` (the local test kit; not deployed by Next).
 
+### Support "To do" (built Nov 17 on `claude/wizardly-wozniak-bha1nu`, tested, NOT deployed)
+- Owner's ask: emails get opened, not answered, and forgotten. Owner chose: one shared list per store; reminders only for
+  urgent ones (clearly upset customers); auto-catch emails opened but not answered within 24 h.
+- `SupportThread` gained todoAt/todoNote/todoById/todoByName/todoAuto/urgent/openedAt/openedById (additive).
+  Logic in `src/lib/support/todo.ts`. "To do" tab (first pill; the inbox still opens on "Needs you") = todoAt set OR
+  status needs_action, urgent first then oldest. On an email: "To do" button → optional note + "Urgent" checkbox; strip
+  "On To do" with Edit / Remove. Leaves the list when a person sends a reply, Mark done, Not a customer, Remove, or (for
+  automatic ones) when the AI auto-replies to a new message.
+- AI decision has a new `upset` field: upset → urgent + straight onto To do (not for first-scan history mail).
+- Opening a needs_reply email stores openedAt/openedById; a new customer message resets it; after 24 h unanswered it is
+  put on To do ("Opened by X, not answered"). Runs on Support page load and in `/api/cron/tasks` (`supportTodo` in its JSON).
+- Urgent reminders: once a day per person, 9 am–9 pm their time, from 2 h after landing on To do, to whoever saved it, or
+  (AI-caught) everyone who answers that store's email (owner, admins/support with the store). Bell + phone push.
+
 ### Open items, in order
 1. **Deploy `7b3c888`** when the owner says "deploy".
 2. **Shopify payout permissions.** Each store's Dev Dashboard app needs `read_shopify_payments_accounts` and
