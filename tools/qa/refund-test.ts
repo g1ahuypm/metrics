@@ -3,7 +3,7 @@
 //   npx tsx --tsconfig tsconfig.json tools/qa/refund-test.ts
 import assert from "node:assert/strict";
 import { refundEvents, sameOrder, type RefundOrderNode } from "../../src/lib/refunds/sync";
-import { refundEmail, LEARNWELL_CLOSING } from "../../src/lib/refunds/email";
+import { refundEmail, LEARNWELL_CLOSING, LEARNWELL_EXTRA } from "../../src/lib/refunds/email";
 
 const m = (amount: string) => ({ shopMoney: { amount, currencyCode: "USD" } });
 const tx = (id: string, kind: string, status: string, createdAt: string, amount: string) => ({ id, kind, status, createdAt, amountSet: m(amount) });
@@ -52,19 +52,35 @@ assert.deepEqual(e.map((x) => [x.amount, x.status]), [[10, "processed"], [20, "f
 
 assert.ok(sameOrder("#LW001473", "lw1473") && sameOrder("1473", "#LW001473") && !sameOrder("#LW001473", "#LW001474"));
 
-const r = { customerName: "Judith King", orderName: "#LW001473", amount: 124.98, currency: "USD", full: true, items: `2× ${POOH}` };
+const W = { closing: LEARNWELL_CLOSING, extra: LEARNWELL_EXTRA, itemsWord: "books" };
+const r = { customerName: "Judi King", orderName: "#LW001473", amount: 124.98, currency: "USD", full: true, items: `2× ${POOH}`, status: "processed" };
+// The owner's approved email (Nov 18), word for word.
+const approved = `Hi Judi,
+
+I'm sorry for the frustration and the time it has taken to resolve this.
+
+We've processed a full refund of $124.98 USD for order #LW001473 to your original payment method, covering both copies in that order. Your bank may take some time to display the credit.
+
+We'll email you return instructions within 2–3 business days. Please wait for those instructions before sending any books back.
+
+I also understand you expected hardcover books. Our earlier website listing described the paperback edition, and I'm sorry for the disappointment over the format.
+
+The book is now available in hardcover. Should you ever wish to shop with us again, you're welcome to use HONEY15 for a discount on a future order.`;
+assert.equal(refundEmail(r, { choice: "needed", apology: true, extra: true }, W), approved);
+
 const out: Record<string, string> = {
-  "Confirmed refund, return required": refundEmail(r, "needed", LEARNWELL_CLOSING),
-  "Return waived": refundEmail(r, "not_needed", LEARNWELL_CLOSING),
-  "Return already completed": refundEmail(r, "received", LEARNWELL_CLOSING),
-  "Partial refund, no items recorded": refundEmail({ ...r, amount: 64.99, full: false, items: null }, "not_needed", LEARNWELL_CLOSING),
+  "Pending refund (started, not processed)": refundEmail({ ...r, status: "pending" }, { choice: "needed", apology: true, extra: true }, W),
+  "Return waived, no paperback paragraph": refundEmail(r, { choice: "not_needed", apology: false, extra: false }, W),
+  "Return already completed": refundEmail(r, { choice: "received", apology: true, extra: false }, W),
+  "Partial refund, no items recorded": refundEmail({ ...r, amount: 64.99, full: false, items: null }, { choice: "not_needed", apology: false, extra: false }, W),
+  "Another store (no wording set)": refundEmail({ ...r, items: "1× Serum" }, { choice: "needed", apology: true, extra: true }, { closing: null, extra: null, itemsWord: null }),
 };
-assert.match(out["Confirmed refund, return required"], /full refund of \$124\.98 USD for Winnie the Pooh: The Complete Stories and Poems \(×2\) in order #LW001473/);
-assert.match(out["Confirmed refund, return required"], /within 2–3 business days/);
-assert.match(out["Confirmed refund, return required"], /HONEY15/);
-assert.match(out["Confirmed refund, return required"], /hardcover/);
-assert.doesNotMatch(out["Return waived"], /return instructions/);
-assert.doesNotMatch(out["Return already completed"], /return instructions/);
-assert.match(out["Partial refund, no items recorded"], /partial refund of \$64\.99 USD for order #LW001473 to/);
+assert.match(out["Pending refund (started, not processed)"], /We've started a full refund of \$124\.98 USD/);
+assert.doesNotMatch(out["Pending refund (started, not processed)"], /processed a/);
+assert.doesNotMatch(out["Return waived, no paperback paragraph"], /return instructions|hardcover books|frustration/);
+assert.match(out["Return already completed"], /received the books you sent back/);
+assert.match(out["Partial refund, no items recorded"], /partial refund of \$64\.99 USD for order #LW001473 to your original payment method\. Your bank/);
+assert.match(out["Another store (no wording set)"], /covering the item in that order[\s\S]*sending any items back[\s\S]*Thank you for your patience/);
+assert.doesNotMatch(out["Another store (no wording set)"], /HONEY15|hardcover/);
 for (const [k, v] of Object.entries(out)) console.log(`--- ${k}\n${v}\n`);
 console.log("refund tests passed");

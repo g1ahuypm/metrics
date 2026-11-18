@@ -96,10 +96,12 @@ const RETURN_LABEL: Record<string, string> = {
 };
 
 /** The follow-up for one refund: the customer's email, then getting the items back. */
-export function RefundActions({ editor, refund: r }: { editor: boolean; refund: RefundRow }) {
+export function RefundActions({ editor, refund: r, extra, suggestExtra }: { editor: boolean; refund: RefundRow; extra: string | null; suggestExtra: boolean }) {
   const [pending, start] = useTransition();
   const [choosing, setChoosing] = useState(false);
   const [choice, setChoice] = useState<ReturnChoice>("needed");
+  const [apology, setApology] = useState(true);
+  const [withExtra, setWithExtra] = useState(suggestExtra);
   const [msg, setMsg] = useState<string | null>(null);
 
   const email = r.sentAt ? (
@@ -110,8 +112,8 @@ export function RefundActions({ editor, refund: r }: { editor: boolean; refund: 
     <Link href={`/support/${r.threadId}`} className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline">
       Email drafted · open in Support <ExternalLink className="h-3 w-3" />
     </Link>
-  ) : r.status !== "processed" ? (
-    <span className="text-xs text-ink-3">{r.status === "failed" ? "Refund failed in Shopify" : "Email once Shopify shows it processed"}</span>
+  ) : r.status === "failed" ? (
+    <span className="text-xs text-bad-text">Refund failed in Shopify</span>
   ) : !r.hasEmail ? (
     <span className="text-xs text-ink-3">No customer email on this order</span>
   ) : editor && !choosing ? (
@@ -134,6 +136,21 @@ export function RefundActions({ editor, refund: r }: { editor: boolean; refund: 
               {c.label}
             </label>
           ))}
+          <label className="mt-2 flex items-start gap-2 text-xs">
+            <input type="checkbox" className="mt-0.5" checked={apology} onChange={(e) => setApology(e.target.checked)} />
+            Start with &quot;I&apos;m sorry for the frustration and the time it has taken to resolve this.&quot;
+          </label>
+          {extra && (
+            <label className="mt-1 flex items-start gap-2 text-xs">
+              <input type="checkbox" className="mt-0.5" checked={withExtra} onChange={(e) => setWithExtra(e.target.checked)} />
+              <span>
+                Include: <span className="text-ink-2">&quot;{extra}&quot;</span>
+              </span>
+            </label>
+          )}
+          {r.status === "pending" && (
+            <p className="mt-2 text-xs text-warn-text">Still pending in Shopify, so the email says the refund has been started and is being processed.</p>
+          )}
           <div className="mt-2 flex gap-2">
             <button
               type="button"
@@ -141,7 +158,7 @@ export function RefundActions({ editor, refund: r }: { editor: boolean; refund: 
               disabled={pending}
               onClick={() =>
                 start(async () => {
-                  const res = await draftRefundEmailAction(r.id, choice);
+                  const res = await draftRefundEmailAction(r.id, { choice, apology, extra: withExtra });
                   setMsg(res?.error ?? null);
                   if (!res?.error) setChoosing(false);
                 })
@@ -174,14 +191,20 @@ export function RefundActions({ editor, refund: r }: { editor: boolean; refund: 
 }
 
 /** The store's own last paragraph (apology, coupon, what's new). */
-export function ClosingForm({ storeId, storeName, closing }: { storeId: string; storeName: string; closing: string }) {
+export function ClosingForm({ storeId, storeName, closing, extra, itemsWord }: { storeId: string; storeName: string; closing: string; extra: string; itemsWord: string }) {
   const [state, action] = useActionState(saveRefundClosingAction.bind(null, storeId), undefined);
   const [text, setText] = useState(closing);
+  const [extraText, setExtraText] = useState(extra);
+  const [word, setWord] = useState(itemsWord);
   return (
     <form action={action} className="card min-w-0 p-4">
-      <h2 className="text-sm font-semibold">{storeName}: last paragraph of refund emails</h2>
-      <p className="mt-1 text-xs text-ink-2">The apology and anything you want to offer (a coupon code, what&apos;s new). It goes at the end of every refund email.</p>
-      <textarea name="closing" className="input mt-3 min-h-[120px] leading-relaxed" value={text} onChange={(e) => setText(e.target.value)} maxLength={600} />
+      <h2 className="text-sm font-semibold">{storeName}: refund email wording</h2>
+      <label className="label mt-3" htmlFor="rf-closing">Last paragraph (every email): what&apos;s new, a coupon code</label>
+      <textarea id="rf-closing" name="closing" className="input min-h-[90px] leading-relaxed" value={text} onChange={(e) => setText(e.target.value)} maxLength={600} />
+      <label className="label mt-3" htmlFor="rf-extra">Optional paragraph (ticked per email, e.g. the paperback explanation)</label>
+      <textarea id="rf-extra" name="extra" className="input min-h-[90px] leading-relaxed" value={extraText} onChange={(e) => setExtraText(e.target.value)} maxLength={600} />
+      <label className="label mt-3" htmlFor="rf-word">What you sell, in &quot;before sending any ___ back&quot;</label>
+      <input id="rf-word" name="itemsWord" className="input sm:w-48" value={word} onChange={(e) => setWord(e.target.value)} placeholder="items" maxLength={30} />
       <div className="mt-3 flex items-center gap-3">
         <SubmitButton className="btn-primary">Save</SubmitButton>
         <FormMessage state={state} />

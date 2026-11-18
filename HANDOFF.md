@@ -103,6 +103,18 @@ and what is open, as of the last session (Nov 17, 2026). Sections after "START H
 - Conflict to raise with the owner: the public refund policy and the `refund_return` topic say refund after the return is
   inspected; approved cases are now refund-first. Not changed.
 
+### Refund email in the owner's approved style + AI voice (Nov 18, NOT deployed yet; waiting for "deploy")
+- The owner sent a ChatGPT-written refund email and said "I want the AI to be responding like that". The refund email
+  template now reproduces it word for word (`tools/qa/refund-test.ts` asserts it): optional apology first, exact refund
+  ("processed" only when Shopify says so, else "started… being processed"), return step, optional store paragraph
+  (`Store.refundEmailExtra`, LearnWell: paperback explanation, pre-ticked when the customer's conversation is about the
+  format), store closing (LearnWell: hardcover + HONEY15), `refundItemsWord` ("books"). Pending refunds can be emailed now.
+- AI voice: the owner's 5-step structure (acknowledge, facts, next step, other concern, warm close) + an example.
+- Paperback topic refined (KB seed v4, replaces the v2 text only if unedited): a paperback received = earlier listing,
+  confirmed; don't ask the team to reconfirm; "not acceptable" without threats isn't upset.
+- Real-model results for the deployed v2 (Nov 18): tests 14, 15, 05, 11 good; 13 over-flagged (fixed above, unverified).
+- #LW001473 refund still PENDING at Shopify Payments at 06:10 UTC Nov 18.
+
 ### Open items, in order
 1. **Deploy `7b3c888`** when the owner says "deploy".
 2. **Shopify payout permissions.** Each store's Dev Dashboard app needs `read_shopify_payments_accounts` and

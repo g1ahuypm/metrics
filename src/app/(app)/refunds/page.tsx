@@ -31,6 +31,14 @@ export default async function RefundsPage() {
       orderBy: { createdAt: "asc" },
     }),
   ]);
+  // Customers whose conversation is about the paperback/hardcover format: their email includes that paragraph by default.
+  const emails = [...new Set(refunds.map((r) => r.customerEmail).filter((e): e is string => Boolean(e)))];
+  const threads = emails.length
+    ? await db.supportThread.findMany({ where: { ...inScope, customerEmail: { in: emails } }, select: { customerEmail: true, topic: true, summary: true, subject: true } })
+    : [];
+  const formatTalk = new Set(
+    threads.filter((t) => t.topic === "edition_format" || /paperback|hard ?cover|soft ?cover/i.test(`${t.summary ?? ""} ${t.subject}`)).map((t) => t.customerEmail),
+  );
   const month = refunds.filter((r) => r.refundedAt >= subDays(new Date(), 30) && r.status !== "failed");
   const pending = refunds.filter((r) => r.status === "pending");
   const toEmail = refunds.filter((r) => r.status === "processed" && !r.emailDraftedAt && r.refundedAt >= subDays(new Date(), 30));
@@ -40,7 +48,11 @@ export default async function RefundsPage() {
   const sum = (rs: typeof refunds) => rs.reduce((s, r) => s + r.amount, 0);
   const store = scope.store;
   const sample = store
-    ? refundEmail({ customerName: "Jane Smith", orderName: "#LW001234", amount: 59.99, currency: store.currency, full: true, items: "1× Winnie the Pooh: The Complete Stories and Poems" }, "needed", store.refundEmailClosing)
+    ? refundEmail(
+        { customerName: "Jane Smith", orderName: "#LW001234", amount: 124.98, currency: store.currency, full: true, items: "2× Winnie the Pooh: The Complete Stories and Poems", status: "processed" },
+        { choice: "needed", apology: true, extra: Boolean(store.refundEmailExtra) },
+        { closing: store.refundEmailClosing, extra: store.refundEmailExtra, itemsWord: store.refundItemsWord },
+      )
     : null;
 
   return (
@@ -104,6 +116,8 @@ export default async function RefundsPage() {
                   drafted: Boolean(r.emailDraftedAt),
                   sentAt: r.emailSentAt ? fmtDateTime(r.emailSentAt, tz) : null,
                 }}
+                extra={storeOf.get(r.storeId)?.refundEmailExtra ?? null}
+                suggestExtra={Boolean(r.customerEmail && formatTalk.has(r.customerEmail))}
               />
             </div>
           );
@@ -117,9 +131,15 @@ export default async function RefundsPage() {
 
       {store && editor && sample && (
         <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <ClosingForm storeId={store.id} storeName={store.name} closing={store.refundEmailClosing ?? DEFAULT_CLOSING} />
+          <ClosingForm
+            storeId={store.id}
+            storeName={store.name}
+            closing={store.refundEmailClosing ?? DEFAULT_CLOSING}
+            extra={store.refundEmailExtra ?? ""}
+            itemsWord={store.refundItemsWord ?? ""}
+          />
           <div className="card min-w-0 p-4">
-            <h2 className="text-sm font-semibold">What the email looks like</h2>
+            <h2 className="text-sm font-semibold">What the email looks like (example)</h2>
             <p className="mt-1 text-xs text-ink-2">
               Filled in from Shopify: exact amount, order and items. It becomes a draft in Support; someone checks it and clicks Send. The signature is added there.
             </p>

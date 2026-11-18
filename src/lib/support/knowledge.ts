@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "../db";
-import { LEARNWELL_CLOSING } from "../refunds/email";
+import { LEARNWELL_CLOSING, LEARNWELL_CLOSING_V1, LEARNWELL_EXTRA } from "../refunds/email";
 
 /**
  * The starting knowledge base, written from LearnWell's published Refund and
@@ -117,7 +117,7 @@ export async function ensureKnowledgeBase(storeId: string): Promise<void> {
   const store = await db.store.findUniqueOrThrow({ where: { id: storeId }, select: { sortOrder: true, kbSeedVersion: true } });
   const original = store.sortOrder === 0 && (await db.store.count({ where: { sortOrder: 0 } })) === 1;
   if ((await db.kbArticle.count({ where: { storeId } })) > 0) {
-    if (store.kbSeedVersion < KB_SEED_VERSION) await addLaterArticles(storeId, original);
+    if (store.kbSeedVersion < KB_SEED_VERSION) await addLaterArticles(storeId, original, store.kbSeedVersion);
     return;
   }
   await db.kbArticle.createMany({
@@ -128,7 +128,7 @@ export async function ensureKnowledgeBase(storeId: string): Promise<void> {
     }),
     skipDuplicates: true,
   });
-  await addLaterArticles(storeId, original);
+  await addLaterArticles(storeId, original, 1);
 }
 
 const GENERIC_OFFER = {
@@ -156,7 +156,7 @@ LearnWell Co · trylearnwell.com
 Monday–Friday, 9:00 AM – 5:00 PM EST`;
 
 /** Bumped whenever owner-confirmed topics are added after a store's knowledge base already exists. */
-const KB_SEED_VERSION = 2;
+const KB_SEED_VERSION = 4;
 
 /** Owner-confirmed facts (Nov 18, 2026), LearnWell only: the earlier paperback edition. */
 const EDITION_ARTICLE = {
@@ -164,7 +164,25 @@ const EDITION_ARTICLE = {
   title: "Paperback vs hardcover (earlier paperback edition)",
   whenToUse:
     "The customer expected a hardcover copy of Winnie the Pooh: The Complete Stories and Poems but received a paperback or softcover.",
-  answer: `Facts (confirmed by the owner):
+  answer: `Facts (confirmed by the owner; never ask the team to confirm them again):
+- We previously offered Winnie the Pooh: The Complete Stories and Poems as a paperback, and the product description on our website said paperback.
+- The current edition is hardcover.
+- A customer who received a paperback copy ordered it under that earlier paperback listing. Treat this as confirmed. Only if the order details themselves contradict it (for example the order lists a hardcover item, or we earlier promised them a hardcover) say so in needsPersonReason instead of giving the explanation.
+
+How to reply to a first complaint that does not ask for a refund or replacement:
+- Start warmly and explain the earlier listing diplomatically, for example: "I understand you were expecting a hardcover, and I'm sorry the format was disappointing. We previously offered this edition as a paperback, and that detail was included in the product description on our website."
+- Adapt it naturally to their message. Never blame them, never say they failed to read or should have checked, never argue that they are wrong, and don't add guesses like "which may be part of the confusion".
+- Do not bring up refunds, replacements, returns, discounts or coupons yourself.
+- Do not say the matter is resolved or that they accepted the explanation. End warmly, for example by inviting them to reply if there's anything else we can help with.
+- A firm complaint such as "this is not acceptable" without threats (chargeback, dispute, review, legal) is disappointment, not upset. Such a first complaint can be a ready draft (no person needed, confidence high).
+
+If they explicitly ask for a refund, return or replacement: answer that request directly. Say our team will review it and reply here; do not keep repeating the paperback explanation to avoid answering. Set needsPerson. Never approve or promise the refund or replacement.`,
+  autoSend: true,
+  flagForTeam: false,
+};
+
+/** The paperback topic as first added (v2); replaced by the current text only if nobody edited it. */
+const EDITION_ANSWER_V2 = `Facts (confirmed by the owner):
 - We previously offered Winnie the Pooh: The Complete Stories and Poems as a paperback, and the product description on our website said paperback.
 - The current edition is hardcover.
 - Today's hardcover listing does not tell you which edition an older order was. If the order details, an earlier promise or other evidence contradict the paperback explanation, say so in needsPersonReason instead of giving it.
@@ -175,19 +193,27 @@ How to reply to a first complaint that does not ask for a refund or replacement:
 - Do not bring up refunds, replacements, returns, discounts or coupons yourself.
 - Do not say the matter is resolved or that they accepted the explanation.
 
-If they explicitly ask for a refund, return or replacement: answer that request directly. Say our team will review it and reply here; do not keep repeating the paperback explanation to avoid answering. Set needsPerson. Never approve or promise the refund or replacement.`,
-  autoSend: true,
-  flagForTeam: false,
-};
+If they explicitly ask for a refund, return or replacement: answer that request directly. Say our team will review it and reply here; do not keep repeating the paperback explanation to avoid answering. Set needsPerson. Never approve or promise the refund or replacement.`;
 
-async function addLaterArticles(storeId: string, original: boolean): Promise<void> {
-  if (original) {
+async function addLaterArticles(storeId: string, original: boolean, from: number): Promise<void> {
+  if (original && from >= 2 && from < 4) {
+    await db.kbArticle.updateMany({ where: { storeId, key: EDITION_ARTICLE.key, answer: EDITION_ANSWER_V2 }, data: { answer: EDITION_ARTICLE.answer } });
+  }
+  if (original && from < 2) {
     const last = await db.kbArticle.aggregate({ where: { storeId }, _max: { sortOrder: true } });
     await db.kbArticle.createMany({ data: [{ ...EDITION_ARTICLE, storeId, sortOrder: (last._max.sortOrder ?? 0) + 1 }], skipDuplicates: true });
   }
-  await db.store.update({
-    where: { id: storeId },
-    // LearnWell's refund email ends with the owner's own paragraph (HONEY15, hardcover); other stores with a plain apology.
-    data: { kbSeedVersion: KB_SEED_VERSION, ...(original ? { refundEmailClosing: LEARNWELL_CLOSING } : {}) },
-  });
+  if (original) {
+    // LearnWell's refund email wording, as the owner approved it; a closing someone already edited is kept.
+    const s = await db.store.findUniqueOrThrow({ where: { id: storeId }, select: { refundEmailClosing: true, refundEmailExtra: true, refundItemsWord: true } });
+    await db.store.update({
+      where: { id: storeId },
+      data: {
+        ...(!s.refundEmailClosing || s.refundEmailClosing === LEARNWELL_CLOSING_V1 ? { refundEmailClosing: LEARNWELL_CLOSING } : {}),
+        ...(!s.refundEmailExtra ? { refundEmailExtra: LEARNWELL_EXTRA } : {}),
+        ...(!s.refundItemsWord ? { refundItemsWord: "books" } : {}),
+      },
+    });
+  }
+  await db.store.update({ where: { id: storeId }, data: { kbSeedVersion: KB_SEED_VERSION } });
 }

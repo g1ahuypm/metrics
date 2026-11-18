@@ -8,7 +8,7 @@ import { requireEditor } from "../auth";
 import { canSeeStore } from "../stores";
 import { getStoreConfig } from "../integrations/config";
 import { syncRefunds } from "../refunds/sync";
-import { refundEmail, type ReturnChoice } from "../refunds/email";
+import { refundEmail, type EmailOptions } from "../refunds/email";
 import { withSignature } from "../support/run";
 import type { FormState } from "./auth";
 
@@ -18,16 +18,20 @@ const CHOICES = ["needed", "not_needed", "received"] as const;
  * Writes the refund confirmation as a draft in the customer's Support conversation (or a new one).
  * Only for a refund Shopify shows as processed, and only once per refund.
  */
-export async function draftRefundEmailAction(refundId: string, choice: ReturnChoice): Promise<FormState & { threadId?: string }> {
+export async function draftRefundEmailAction(refundId: string, opts: EmailOptions): Promise<FormState & { threadId?: string }> {
   const me = await requireEditor();
+  const choice = opts?.choice;
   if (!CHOICES.includes(choice)) return { error: "Pick whether the items come back" };
   const r = await db.refund.findUnique({ where: { id: refundId }, include: { store: true } });
   if (!r || !(await canSeeStore(me, r.storeId))) return { error: "Refund not found" };
-  if (r.status !== "processed") return { error: "Shopify doesn't show this refund as processed yet. Write the email once it is." };
+  if (r.status === "failed") return { error: "This refund failed in Shopify, so there is nothing to confirm." };
   if (r.emailDraftedAt && r.emailThreadId) return { error: "The email for this refund was already written.", threadId: r.emailThreadId };
   if (!r.customerEmail) return { error: "This order has no customer email in Shopify." };
 
-  const body = withSignature(refundEmail(r, choice, r.store.refundEmailClosing), r.store);
+  const body = withSignature(
+    refundEmail(r, { choice, apology: Boolean(opts.apology), extra: Boolean(opts.extra) }, { closing: r.store.refundEmailClosing, extra: r.store.refundEmailExtra, itemsWord: r.store.refundItemsWord }),
+    r.store,
+  );
   const due = format(addBusinessDays(new Date(), 3), "EEE MMM d");
   const actionNote = choice === "needed" ? `Email return instructions for ${r.orderName} (promised within 2–3 business days, by ${due}).` : null;
   // The customer's latest conversation, so the confirmation lands where they already wrote; else a new one.
@@ -103,7 +107,9 @@ export async function saveRefundClosingAction(storeId: string, _prev: FormState,
   const me = await requireEditor();
   if (!(await canSeeStore(me, storeId))) return { error: "Pick a store you can see" };
   const text = String(formData.get("closing") ?? "").trim().slice(0, 600);
-  await db.store.update({ where: { id: storeId }, data: { refundEmailClosing: text || null } });
+  const extra = String(formData.get("extra") ?? "").trim().slice(0, 600);
+  const itemsWord = String(formData.get("itemsWord") ?? "").trim().slice(0, 30);
+  await db.store.update({ where: { id: storeId }, data: { refundEmailClosing: text || null, refundEmailExtra: extra || null, refundItemsWord: itemsWord || null } });
   revalidatePath("/refunds");
   return { success: "Saved. New refund emails use it." };
 }

@@ -527,6 +527,8 @@ model Store {
   plannedRefunds   PlannedRefund[]
   // Refund confirmation emails: the last paragraph (apology, coupon, what's new). Store-specific.
   refundEmailClosing String?
+  refundEmailExtra   String? // optional paragraph the team can include (LearnWell: the paperback/hardcover explanation)
+  refundItemsWord    String? // "books" in "before sending any books back"; default "items"
   kbSeedVersion      Int     @default(1) // which later knowledge-base additions were already added
   bankTransactions BankTransaction[]
 
