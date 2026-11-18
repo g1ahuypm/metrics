@@ -41,7 +41,10 @@ export async function sendSupportReplyAction(threadId: string, text: string): Pr
     // Answered by a person: off the To do list.
     data: { status: thread?.actionNote ? "needs_action" : "replied", draft: null, holdReason: null, category: "customer", unread: false, ...OFF_TODO },
   });
+  // A refund confirmation written from the Refunds page is now sent.
+  await db.refund.updateMany({ where: { emailThreadId: threadId, emailDraftedAt: { not: null }, emailSentAt: null }, data: { emailSentAt: new Date() } });
   revalidatePath("/support", "layout");
+  revalidatePath("/refunds");
   return { success: "Sent" };
 }
 

@@ -85,6 +85,24 @@ and what is open, as of the last session (Nov 17, 2026). Sections after "START H
   attachment notices, then the rest by value. Real store facts: Puzzle Packet = digital ($19.99), Pooh's Fine Painted
   Poster = PDF ($24.99), "Hundred Acre Puzzle Post" ($49.99, created Nov 10, no description: ask the owner what it is).
 
+### Refunds page + paperback/refund AI update (Nov 18, deployed on the owner's "deploy it too")
+- `/refunds` (all roles but Support; buttons for owner/admin): refunds read from Shopify on every sync
+  (`src/lib/refunds/sync.ts`): REFUND transactions on an order within 10 min = one refund (one click in Shopify makes one
+  transaction per charge, and items may sit on a separate $0 refund). Status pending/processed/failed from the
+  transactions (a pending refund leaves the order "Paid"). First run: 60 days of refunded orders + 7 days of all.
+  "Refunds still to make" (PlannedRefund) is ticked off when a refund appears on that order.
+- Refund email: a fixed template filled from Shopify (`src/lib/refunds/email.ts`), only for processed refunds, once per
+  refund; choice: items come back (2–3 business days instructions, follow-up on To do) / kept / already received.
+  Last paragraph per store (`Store.refundEmailClosing`; LearnWell = owner's text with HONEY15 + hardcover). Draft goes into
+  the customer's latest Support conversation (or a new one); Send marks the refund "Email sent".
+- AI: "REMEDIES ARE A LAST RESORT" section, never "processed" unless the order data says completed (orders now carry
+  refund lines: "… refund started …, still pending"), no mentions of its own limits, future team steps not "already
+  arranged". New LearnWell KB topic `edition_format` (owner facts: earlier paperback listing; current edition hardcover),
+  added once via `Store.kbSeedVersion` = 2. Tests 13–15 added. Template cases tested in `tools/qa/refund-test.ts`.
+- Real data Nov 18: #LW001473's refund ($59.99 + $64.99) is PENDING at Shopify Payments; don't confirm it yet.
+- Conflict to raise with the owner: the public refund policy and the `refund_return` topic say refund after the return is
+  inspected; approved cases are now refund-first. Not changed.
+
 ### Open items, in order
 1. **Deploy `7b3c888`** when the owner says "deploy".
 2. **Shopify payout permissions.** Each store's Dev Dashboard app needs `read_shopify_payments_accounts` and

@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "../db";
+import { LEARNWELL_CLOSING } from "../refunds/email";
 
 /**
  * The starting knowledge base, written from LearnWell's published Refund and
@@ -113,9 +114,12 @@ Do not quote a price or a discount that isn't stated here.`,
  * with automatic replies off until the owner has checked the facts.
  */
 export async function ensureKnowledgeBase(storeId: string): Promise<void> {
-  if ((await db.kbArticle.count({ where: { storeId } })) > 0) return;
-  const store = await db.store.findUniqueOrThrow({ where: { id: storeId }, select: { sortOrder: true } });
+  const store = await db.store.findUniqueOrThrow({ where: { id: storeId }, select: { sortOrder: true, kbSeedVersion: true } });
   const original = store.sortOrder === 0 && (await db.store.count({ where: { sortOrder: 0 } })) === 1;
+  if ((await db.kbArticle.count({ where: { storeId } })) > 0) {
+    if (store.kbSeedVersion < KB_SEED_VERSION) await addLaterArticles(storeId, original);
+    return;
+  }
   await db.kbArticle.createMany({
     data: DEFAULT_ARTICLES.map((a, i) => {
       if (original) return { ...a, storeId, sortOrder: i };
@@ -124,6 +128,7 @@ export async function ensureKnowledgeBase(storeId: string): Promise<void> {
     }),
     skipDuplicates: true,
   });
+  await addLaterArticles(storeId, original);
 }
 
 const GENERIC_OFFER = {
@@ -149,3 +154,40 @@ export const DEFAULT_SIGNATURE = `Warm regards,
 The LearnWell Customer Care Team
 LearnWell Co · trylearnwell.com
 Monday–Friday, 9:00 AM – 5:00 PM EST`;
+
+/** Bumped whenever owner-confirmed topics are added after a store's knowledge base already exists. */
+const KB_SEED_VERSION = 2;
+
+/** Owner-confirmed facts (Nov 18, 2026), LearnWell only: the earlier paperback edition. */
+const EDITION_ARTICLE = {
+  key: "edition_format",
+  title: "Paperback vs hardcover (earlier paperback edition)",
+  whenToUse:
+    "The customer expected a hardcover copy of Winnie the Pooh: The Complete Stories and Poems but received a paperback or softcover.",
+  answer: `Facts (confirmed by the owner):
+- We previously offered Winnie the Pooh: The Complete Stories and Poems as a paperback, and the product description on our website said paperback.
+- The current edition is hardcover.
+- Today's hardcover listing does not tell you which edition an older order was. If the order details, an earlier promise or other evidence contradict the paperback explanation, say so in needsPersonReason instead of giving it.
+
+How to reply to a first complaint that does not ask for a refund or replacement:
+- Start warmly and explain the earlier listing diplomatically, for example: "I understand you were expecting a hardcover, and I'm sorry the format was disappointing. We previously offered this edition as a paperback, and that detail was included in the product description on our website."
+- Adapt it naturally to their message. Never blame them, never say they failed to read or should have checked, never argue that they are wrong.
+- Do not bring up refunds, replacements, returns, discounts or coupons yourself.
+- Do not say the matter is resolved or that they accepted the explanation.
+
+If they explicitly ask for a refund, return or replacement: answer that request directly. Say our team will review it and reply here; do not keep repeating the paperback explanation to avoid answering. Set needsPerson. Never approve or promise the refund or replacement.`,
+  autoSend: true,
+  flagForTeam: false,
+};
+
+async function addLaterArticles(storeId: string, original: boolean): Promise<void> {
+  if (original) {
+    const last = await db.kbArticle.aggregate({ where: { storeId }, _max: { sortOrder: true } });
+    await db.kbArticle.createMany({ data: [{ ...EDITION_ARTICLE, storeId, sortOrder: (last._max.sortOrder ?? 0) + 1 }], skipDuplicates: true });
+  }
+  await db.store.update({
+    where: { id: storeId },
+    // LearnWell's refund email ends with the owner's own paragraph (HONEY15, hardcover); other stores with a plain apology.
+    data: { kbSeedVersion: KB_SEED_VERSION, ...(original ? { refundEmailClosing: LEARNWELL_CLOSING } : {}) },
+  });
+}

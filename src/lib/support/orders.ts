@@ -13,6 +13,8 @@ export type SupportOrder = {
   shipTo: string;
   items: string[];
   shipments: { shippedAt: string; status: string; carrier: string | null; tracking: string | null; trackingUrl: string | null; deliveredAt: string | null }[];
+  /** e.g. "124.98 USD refund started 2026-11-18, still pending", "59.99 USD refunded on 2026-11-04 (completed)" */
+  refunds?: string[];
 };
 
 const ORDER_FIELDS = `
@@ -20,7 +22,8 @@ const ORDER_FIELDS = `
   currentTotalPriceSet { shopMoney { amount currencyCode } }
   shippingAddress { city provinceCode countryCodeV2 }
   lineItems(first: 10) { nodes { title currentQuantity } }
-  fulfillments(first: 5) { createdAt displayStatus deliveredAt trackingInfo(first: 3) { company number url } }`;
+  fulfillments(first: 5) { createdAt displayStatus deliveredAt trackingInfo(first: 3) { company number url } }
+  transactions(first: 15) { kind status createdAt amountSet { shopMoney { amount currencyCode } } }`;
 
 type Node = {
   name: string;
@@ -32,9 +35,32 @@ type Node = {
   shippingAddress: { city: string | null; provinceCode: string | null; countryCodeV2: string | null } | null;
   lineItems: { nodes: { title: string; currentQuantity: number }[] };
   fulfillments: { createdAt: string; displayStatus: string | null; deliveredAt: string | null; trackingInfo: { company: string | null; number: string | null; url: string | null }[] }[];
+  transactions?: Tx[];
 };
 
 const tidy = (s: string | null | undefined) => (s ? s.toLowerCase().replace(/_/g, " ") : "unknown");
+
+type Tx = { kind: string; status: string; createdAt: string; amountSet: { shopMoney: { amount: string; currencyCode: string } } };
+
+/** Refund transactions, one line per day and status, so the AI never calls a pending refund done. */
+function refundLines(txs: Tx[]): string[] {
+  const groups = new Map<string, { amount: number; currency: string; day: string; status: string }>();
+  for (const t of txs) {
+    if (t.kind !== "REFUND") continue;
+    const day = t.createdAt.slice(0, 10);
+    const status = t.status === "SUCCESS" ? "completed" : t.status === "PENDING" ? "pending" : "failed";
+    const k = `${day}:${status}`;
+    const g = groups.get(k) ?? { amount: 0, currency: t.amountSet.shopMoney.currencyCode, day, status };
+    g.amount += Number(t.amountSet.shopMoney.amount);
+    groups.set(k, g);
+  }
+  return [...groups.values()].map((g) => {
+    const amt = `${g.amount.toFixed(2)} ${g.currency}`;
+    if (g.status === "completed") return `${amt} refunded on ${g.day} (completed)`;
+    if (g.status === "pending") return `${amt} refund started ${g.day}, still pending (being processed, not completed)`;
+    return `${amt} refund attempted ${g.day} failed`;
+  });
+}
 
 function toSupportOrder(o: Node): SupportOrder {
   return {
@@ -46,6 +72,7 @@ function toSupportOrder(o: Node): SupportOrder {
     total: `${o.currentTotalPriceSet.shopMoney.amount} ${o.currentTotalPriceSet.shopMoney.currencyCode}`,
     shipTo: [o.shippingAddress?.city, o.shippingAddress?.provinceCode, o.shippingAddress?.countryCodeV2].filter(Boolean).join(", "),
     items: o.lineItems.nodes.filter((li) => li.currentQuantity > 0).map((li) => `${li.currentQuantity}× ${li.title}`),
+    refunds: refundLines(o.transactions ?? []),
     shipments: o.fulfillments.map((f) => ({
       shippedAt: f.createdAt,
       status: tidy(f.displayStatus),

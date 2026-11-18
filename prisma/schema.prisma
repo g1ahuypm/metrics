@@ -523,6 +523,11 @@ model Store {
   articles         KbArticle[]
   tasks            Task[]
   payouts          ShopifyPayout[]
+  refunds          Refund[]
+  plannedRefunds   PlannedRefund[]
+  // Refund confirmation emails: the last paragraph (apology, coupon, what's new). Store-specific.
+  refundEmailClosing String?
+  kbSeedVersion      Int     @default(1) // which later knowledge-base additions were already added
   bankTransactions BankTransaction[]
 
   // Shopify Payments: money not yet paid out (needs the payouts scopes on the Shopify app)
@@ -654,4 +659,49 @@ model ShopifyPayout {
   bankTransaction BankTransaction?
 
   @@index([storeId, issuedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Refunds (Refunds page): read from Shopify, plus the team's follow-up
+// ---------------------------------------------------------------------------
+
+/** One refund as the team thinks of it: Shopify refund transactions on an order made together. */
+model Refund {
+  id             String    @id @default(cuid())
+  storeId        String
+  store          Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  key            String // the first Shopify refund transaction id of the group
+  orderShopifyId String
+  orderName      String
+  customerName   String?
+  customerEmail  String?
+  refundedAt     DateTime
+  amount         Float
+  currency       String    @default("USD")
+  status         String // pending | processed | failed
+  full           Boolean   @default(false) // the whole order was refunded
+  items          String? // "2× Winnie the Pooh…"; null when Shopify recorded no items
+  note           String? // the note typed in Shopify
+  // Follow-up by the team
+  returnStatus   String? // null (not decided) | needed | instructions_sent | received | not_needed
+  emailThreadId  String? // the Support conversation holding the confirmation email
+  emailDraftedAt DateTime?
+  emailSentAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([storeId, key])
+  @@index([storeId, refundedAt])
+}
+
+/** A refund the team still has to make ("another refund coming"); done once Shopify shows one on that order. */
+model PlannedRefund {
+  id        String    @id @default(cuid())
+  storeId   String
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orderName String
+  note      String?
+  addedBy   String?
+  createdAt DateTime  @default(now())
+  doneAt    DateTime?
 }

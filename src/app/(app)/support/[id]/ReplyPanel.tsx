@@ -157,7 +157,7 @@ export function ReplyPanel({
           <strong className="font-semibold">Needs a decision:</strong> {holdReason.replace(/\.$/, "")}. Fix the draft below if needed, then send it.
         </p>
       )}
-      {draftReady && <p className="mb-2 text-xs text-good-text">The AI&apos;s draft is ready. Read it, then send it.</p>}
+      {draftReady && <p className="mb-2 text-xs text-good-text">The draft is ready. Read it, then send it.</p>}
       {afterSending && (
         <p className="mb-2 text-xs text-ink-2">
           <strong className="font-semibold text-ink">After sending:</strong> {afterSending}

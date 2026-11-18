@@ -66,6 +66,7 @@ Never `pkill -f "next start"`: it matches the shell running it and kills the com
 | `switch.mjs BASE` | After switching stores, every form box equals a fresh load of that store (Settings, Expenses, Support, Knowledge base). |
 | `access.mjs` | Owner / admin with one store / partner with two: switcher, forced "all" cookie, links and CSV to a store they lack, Team controls. |
 | `cash2.mjs PHASE STEP` | Cash page end to end against `fakeplaid.js` (`echo '{"phase":1}' > fakeplaid-state.json`; steps `connect`, `sort`, then phase 2 `refresh`, or `check`): every figure compared with totals computed independently from the stand-in's raw data, parts add up to the balance, payouts matched. Set `"loginRequired": true` in the state file to test re-login. |
+| `refund-test.ts` | Refund grouping on shapes copied from real orders (pending two-charge refund, money refunded days after the items, partial with note, failed), order-number matching, and the refund email variants. Same `server-only` stub as below. |
 | `payout-test.ts` | Shopify payouts sync against a stand-in (fetch is replaced): old cached key refused, fresh key fetched once, 3 pages saved, next run reads one page. Run from the repo root with a temporary `node_modules/server-only` stub (an empty package): `DATABASE_URL=... APP_SECRET=... npx tsx --tsconfig tsconfig.json tools/qa/payout-test.ts`, then remove the stub. |
 
 ## Support inbox stand-ins (`tools/qa/support/`)

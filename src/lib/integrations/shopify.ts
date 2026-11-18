@@ -8,6 +8,7 @@ import { recomputeCampaignStores } from "../stores";
 import { decrypt, encrypt } from "../crypto";
 import type { StoreConfig, ShopifyAuth } from "./config";
 import { syncPayouts } from "../cash/payouts";
+import { syncRefunds } from "../refunds/sync";
 
 const API_VERSION = "2025-07";
 
@@ -434,6 +435,12 @@ export async function syncShopify(cfg: StoreConfig, opts: { full?: boolean } = {
   await recomputeCampaignStores();
   // Payouts for the Cash page; a missing permission is noted on the store, never an error here.
   await syncPayouts(cfg);
+  // Refunds for the Refunds page; a problem there never stops the order sync.
+  try {
+    await syncRefunds(cfg);
+  } catch (err) {
+    console.error("refund sync failed", err instanceof Error ? err.message : err);
+  }
   await db.store.update({ where: { id: cfg.storeId }, data: { lastShopifySyncAt: new Date() } });
   return { variants, orders };
 }

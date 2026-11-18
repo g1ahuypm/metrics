@@ -116,6 +116,11 @@ export default async function SupportThreadPage({ params }: { params: Promise<{ 
                     {o.total} · {o.paymentStatus} · {o.fulfillmentStatus}
                     {o.shipTo ? ` · ${o.shipTo}` : ""}
                   </div>
+                  {o.refunds?.map((r) => (
+                    <div key={r} className="mt-1 text-xs text-warn-text">
+                      Refund: {r.replace(" (being processed, not completed)", "").replace(" (completed)", ", completed")}
+                    </div>
+                  ))}
                   {o.shipments.map((s, i) => (
                     <div key={i} className="mt-1 text-xs">
                       Shipped {fmtDateTime(s.shippedAt, tz)}
