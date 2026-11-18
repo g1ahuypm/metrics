@@ -25,7 +25,7 @@ export async function runSync(target: SyncTarget, opts: { full?: boolean } = {})
       if (!cfg.shopify) throw new Error("Shopify is not connected for this store. Add its domain, Client ID and Client secret in Settings.");
       const r = await syncShopify(cfg, opts);
       records = r.orders;
-      message = `${cfg.storeName}: ${opts.full ? "full resync, " : ""}${r.orders} orders and ${r.variants} product variants`;
+      message = `${cfg.storeName}: ${opts.full ? "full resync, " : ""}${r.orders} orders and ${r.variants} product variants, ${r.refunds}`;
     } else {
       const cfg = (await getAdAccountConfigs()).find((a) => a.id === target.adAccountId);
       if (!cfg) throw new Error("This Meta ad account is not connected (or has no access token). Check Settings.");

@@ -418,7 +418,7 @@ export async function recomputeNewCustomers(): Promise<void> {
   });
 }
 
-export async function syncShopify(cfg: StoreConfig, opts: { full?: boolean } = {}): Promise<{ variants: number; orders: number }> {
+export async function syncShopify(cfg: StoreConfig, opts: { full?: boolean } = {}): Promise<{ variants: number; orders: number; refunds: string }> {
   if (!cfg.shopify) throw new Error("Shopify is not connected");
   // Reports split days in the store's own timezone, exactly like Shopify Analytics.
   const shop = await shopifyGraphQL<{ shop: { ianaTimezone: string; currencyCode: string } }>(cfg.shopify, `{ shop { ianaTimezone currencyCode } }`);
@@ -436,11 +436,14 @@ export async function syncShopify(cfg: StoreConfig, opts: { full?: boolean } = {
   // Payouts for the Cash page; a missing permission is noted on the store, never an error here.
   await syncPayouts(cfg);
   // Refunds for the Refunds page; a problem there never stops the order sync.
+  let refunds: string;
   try {
-    await syncRefunds(cfg);
+    const n = await syncRefunds(cfg);
+    refunds = `${n} refund${n === 1 ? "" : "s"} checked`;
   } catch (err) {
+    refunds = "refunds not read";
     console.error("refund sync failed", err instanceof Error ? err.message : err);
   }
   await db.store.update({ where: { id: cfg.storeId }, data: { lastShopifySyncAt: new Date() } });
-  return { variants, orders };
+  return { variants, orders, refunds };
 }

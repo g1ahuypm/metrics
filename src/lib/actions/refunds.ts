@@ -131,3 +131,15 @@ export async function checkRefundsNowAction(storeIds: string[]): Promise<FormSta
   revalidatePath("/refunds");
   return { success: n ? `Up to date (${n} refund${n === 1 ? "" : "s"} checked)` : "Up to date" };
 }
+
+/** The customer was already told outside the app (e.g. straight from Gmail): no draft, just the record. */
+export async function markRefundEmailedAction(refundId: string, choice: "needed" | "not_needed" | "received"): Promise<FormState> {
+  const me = await requireEditor();
+  if (!CHOICES.includes(choice)) return { error: "Pick whether the items come back" };
+  const r = await db.refund.findUnique({ where: { id: refundId }, select: { storeId: true } });
+  if (!r || !(await canSeeStore(me, r.storeId))) return { error: "Refund not found" };
+  const now = new Date();
+  await db.refund.update({ where: { id: refundId }, data: { returnStatus: choice, emailDraftedAt: now, emailSentAt: now } });
+  revalidatePath("/refunds");
+  return { success: "Marked as emailed" };
+}

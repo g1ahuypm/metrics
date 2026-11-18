@@ -2,11 +2,20 @@
 
 import { useActionState, useState, useTransition } from "react";
 import Link from "next/link";
-import { Check, ExternalLink, Loader2, Mail, Plus, RefreshCw, X } from "lucide-react";
+import {
+  Check,
+  ExternalLink,
+  Loader2,
+  Mail,
+  Plus,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import {
   addPlannedRefundAction,
   checkRefundsNowAction,
   draftRefundEmailAction,
+  markRefundEmailedAction,
   removePlannedRefundAction,
   saveRefundClosingAction,
   setReturnStatusAction,
@@ -21,36 +30,85 @@ export function CheckRefundsButton({ storeIds }: { storeIds: string[] }) {
   const [msg, setMsg] = useState<FormState>(undefined);
   return (
     <div className="flex items-center gap-2">
-      {msg && <span className={`text-xs ${msg.error ? "text-bad-text" : "text-good-text"}`}>{msg.error ?? msg.success}</span>}
-      <button type="button" className="btn-secondary" disabled={pending} onClick={() => start(async () => setMsg(await checkRefundsNowAction(storeIds)))}>
-        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Check Shopify now
+      {msg && (
+        <span
+          className={`text-xs ${msg.error ? "text-bad-text" : "text-good-text"}`}
+        >
+          {msg.error ?? msg.success}
+        </span>
+      )}
+      <button
+        type="button"
+        className="btn-secondary"
+        disabled={pending}
+        onClick={() =>
+          start(async () => setMsg(await checkRefundsNowAction(storeIds)))
+        }
+      >
+        {pending ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <RefreshCw className="h-4 w-4" />
+        )}{" "}
+        Check Shopify now
       </button>
     </div>
   );
 }
 
-type Planned = { id: string; orderName: string; note: string | null; addedBy: string | null; done: boolean; added: string };
+type Planned = {
+  id: string;
+  orderName: string;
+  note: string | null;
+  addedBy: string | null;
+  done: boolean;
+  added: string;
+};
 
 /** Refunds the team still has to make in Shopify. */
-export function PlannedRefunds({ storeId, editor, items }: { storeId: string | null; editor: boolean; items: Planned[] }) {
+export function PlannedRefunds({
+  storeId,
+  editor,
+  items,
+}: {
+  storeId: string | null;
+  editor: boolean;
+  items: Planned[];
+}) {
   const [pending, start] = useTransition();
   return (
     <div className="card p-4">
       <h2 className="text-sm font-semibold">Refunds still to make</h2>
-      <p className="mt-1 text-xs text-ink-2">Add an order you&apos;ve promised to refund. It&apos;s ticked off by itself once the refund shows up in Shopify.</p>
+      <p className="mt-1 text-xs text-ink-2">
+        Add an order you&apos;ve promised to refund. It&apos;s ticked off by
+        itself once the refund shows up in Shopify.
+      </p>
       {items.length > 0 && (
         <ul className="mt-3 divide-y divide-border rounded-xl border border-border">
           {items.map((p) => (
-            <li key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-              <span className={`min-w-0 ${p.done ? "text-ink-3 line-through" : ""}`}>
+            <li
+              key={p.id}
+              className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+            >
+              <span
+                className={`min-w-0 ${p.done ? "text-ink-3 line-through" : ""}`}
+              >
                 <strong className="font-semibold">{p.orderName}</strong>
                 {p.note ? ` · ${p.note}` : ""}
                 <span className="ml-1 text-xs text-ink-3 no-underline">
-                  {p.done ? "· done in Shopify" : `· added ${p.added}${p.addedBy ? ` by ${p.addedBy}` : ""}`}
+                  {p.done
+                    ? "· done in Shopify"
+                    : `· added ${p.added}${p.addedBy ? ` by ${p.addedBy}` : ""}`}
                 </span>
               </span>
               {editor && !p.done && (
-                <button type="button" className="btn-ghost py-1 text-xs" disabled={pending} onClick={() => start(() => removePlannedRefundAction(p.id))} aria-label={`Remove ${p.orderName}`}>
+                <button
+                  type="button"
+                  className="btn-ghost py-1 text-xs"
+                  disabled={pending}
+                  onClick={() => start(() => removePlannedRefundAction(p.id))}
+                  aria-label={`Remove ${p.orderName}`}
+                >
                   <X className="h-3.5 w-3.5" /> Remove
                 </button>
               )}
@@ -59,23 +117,47 @@ export function PlannedRefunds({ storeId, editor, items }: { storeId: string | n
         </ul>
       )}
       {editor && storeId && <AddPlanned storeId={storeId} />}
-      {editor && !storeId && <p className="mt-3 text-xs text-ink-3">Pick a store above to add one.</p>}
+      {editor && !storeId && (
+        <p className="mt-3 text-xs text-ink-3">
+          Pick a store above to add one.
+        </p>
+      )}
     </div>
   );
 }
 
 function AddPlanned({ storeId }: { storeId: string }) {
-  const [state, action] = useActionState(addPlannedRefundAction.bind(null, storeId), undefined);
+  const [state, action] = useActionState(
+    addPlannedRefundAction.bind(null, storeId),
+    undefined,
+  );
   return (
     <>
-      <form action={action} className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+      <form
+        action={action}
+        className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end"
+      >
         <div className="sm:w-40">
-          <label className="label" htmlFor="pr-order">Order number</label>
-          <input id="pr-order" name="orderName" className="input" placeholder="#LW001473" />
+          <label className="label" htmlFor="pr-order">
+            Order number
+          </label>
+          <input
+            id="pr-order"
+            name="orderName"
+            className="input"
+            placeholder="#LW001473"
+          />
         </div>
         <div className="flex-1">
-          <label className="label" htmlFor="pr-note">Note (optional)</label>
-          <input id="pr-note" name="note" className="input" placeholder="e.g. paperback complaint, full refund agreed" />
+          <label className="label" htmlFor="pr-note">
+            Note (optional)
+          </label>
+          <input
+            id="pr-note"
+            name="note"
+            className="input"
+            placeholder="e.g. paperback complaint, full refund agreed"
+          />
         </div>
         <SubmitButton className="btn-secondary">
           <Plus className="h-4 w-4" /> Add
@@ -86,7 +168,15 @@ function AddPlanned({ storeId }: { storeId: string }) {
   );
 }
 
-type RefundRow = { id: string; status: string; hasEmail: boolean; returnStatus: string | null; threadId: string | null; drafted: boolean; sentAt: string | null };
+type RefundRow = {
+  id: string;
+  status: string;
+  hasEmail: boolean;
+  returnStatus: string | null;
+  threadId: string | null;
+  drafted: boolean;
+  sentAt: string | null;
+};
 
 const RETURN_LABEL: Record<string, string> = {
   needed: "Return instructions to send",
@@ -96,9 +186,20 @@ const RETURN_LABEL: Record<string, string> = {
 };
 
 /** The follow-up for one refund: the customer's email, then getting the items back. */
-export function RefundActions({ editor, refund: r, extra, suggestExtra }: { editor: boolean; refund: RefundRow; extra: string | null; suggestExtra: boolean }) {
+export function RefundActions({
+  editor,
+  refund: r,
+  extra,
+  suggestExtra,
+}: {
+  editor: boolean;
+  refund: RefundRow;
+  extra: string | null;
+  suggestExtra: boolean;
+}) {
   const [pending, start] = useTransition();
-  const [choosing, setChoosing] = useState(false);
+  // "draft": writing the email in Support; "marked": the customer was already emailed outside the app.
+  const [choosing, setChoosing] = useState<false | "draft" | "marked">(false);
   const [choice, setChoice] = useState<ReturnChoice>("needed");
   const [apology, setApology] = useState(true);
   const [withExtra, setWithExtra] = useState(suggestExtra);
@@ -109,7 +210,10 @@ export function RefundActions({ editor, refund: r, extra, suggestExtra }: { edit
       <Check className="h-3.5 w-3.5" /> Email sent {r.sentAt}
     </span>
   ) : r.drafted && r.threadId ? (
-    <Link href={`/support/${r.threadId}`} className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline">
+    <Link
+      href={`/support/${r.threadId}`}
+      className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+    >
       Email drafted · open in Support <ExternalLink className="h-3 w-3" />
     </Link>
   ) : r.status === "failed" ? (
@@ -117,9 +221,22 @@ export function RefundActions({ editor, refund: r, extra, suggestExtra }: { edit
   ) : !r.hasEmail ? (
     <span className="text-xs text-ink-3">No customer email on this order</span>
   ) : editor && !choosing ? (
-    <button type="button" className="btn-secondary py-1.5 text-sm" onClick={() => setChoosing(true)}>
-      <Mail className="h-4 w-4" /> Write refund email
-    </button>
+    <span className="flex flex-wrap items-center gap-1 lg:justify-end">
+      <button
+        type="button"
+        className="btn-secondary py-1.5 text-sm"
+        onClick={() => setChoosing("draft")}
+      >
+        <Mail className="h-4 w-4" /> Write refund email
+      </button>
+      <button
+        type="button"
+        className="btn-ghost py-1.5 text-xs"
+        onClick={() => setChoosing("marked")}
+      >
+        Already emailed
+      </button>
+    </span>
   ) : (
     <span className="text-xs text-warn-text">Customer not emailed yet</span>
   );
@@ -129,27 +246,62 @@ export function RefundActions({ editor, refund: r, extra, suggestExtra }: { edit
       {email}
       {choosing && (
         <div className="w-full rounded-xl border border-border p-3 text-sm">
-          <div className="mb-1 text-xs font-medium text-ink-2">Do the items come back?</div>
+          {choosing === "marked" && (
+            <div className="mb-2 text-xs text-ink-2">
+              For a customer you already emailed yourself. Nothing is sent.
+            </div>
+          )}
+          <div className="mb-1 text-xs font-medium text-ink-2">
+            Do the items come back?
+          </div>
           {RETURN_CHOICES.map((c) => (
-            <label key={c.value} className="flex items-start gap-2 py-0.5 text-xs">
-              <input type="radio" name={`ret-${r.id}`} className="mt-0.5" checked={choice === c.value} onChange={() => setChoice(c.value)} />
+            <label
+              key={c.value}
+              className="flex items-start gap-2 py-0.5 text-xs"
+            >
+              <input
+                type="radio"
+                name={`ret-${r.id}`}
+                className="mt-0.5"
+                checked={choice === c.value}
+                onChange={() => setChoice(c.value)}
+              />
               {c.label}
             </label>
           ))}
-          <label className="mt-2 flex items-start gap-2 text-xs">
-            <input type="checkbox" className="mt-0.5" checked={apology} onChange={(e) => setApology(e.target.checked)} />
-            Start with &quot;I&apos;m sorry for the frustration and the time it has taken to resolve this.&quot;
-          </label>
-          {extra && (
-            <label className="mt-1 flex items-start gap-2 text-xs">
-              <input type="checkbox" className="mt-0.5" checked={withExtra} onChange={(e) => setWithExtra(e.target.checked)} />
-              <span>
-                Include: <span className="text-ink-2">&quot;{extra}&quot;</span>
-              </span>
-            </label>
-          )}
-          {r.status === "pending" && (
-            <p className="mt-2 text-xs text-warn-text">Still pending in Shopify, so the email says the refund has been started and is being processed.</p>
+          {choosing === "draft" && (
+            <>
+              <label className="mt-2 flex items-start gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={apology}
+                  onChange={(e) => setApology(e.target.checked)}
+                />
+                Start with &quot;I&apos;m sorry for the frustration and the time
+                it has taken to resolve this.&quot;
+              </label>
+              {extra && (
+                <label className="mt-1 flex items-start gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={withExtra}
+                    onChange={(e) => setWithExtra(e.target.checked)}
+                  />
+                  <span>
+                    Include:{" "}
+                    <span className="text-ink-2">&quot;{extra}&quot;</span>
+                  </span>
+                </label>
+              )}
+              {r.status === "pending" && (
+                <p className="mt-2 text-xs text-warn-text">
+                  Still pending in Shopify, so the email says the refund has
+                  been started and is being processed.
+                </p>
+              )}
+            </>
           )}
           <div className="mt-2 flex gap-2">
             <button
@@ -158,53 +310,137 @@ export function RefundActions({ editor, refund: r, extra, suggestExtra }: { edit
               disabled={pending}
               onClick={() =>
                 start(async () => {
-                  const res = await draftRefundEmailAction(r.id, { choice, apology, extra: withExtra });
+                  const res =
+                    choosing === "marked"
+                      ? await markRefundEmailedAction(r.id, choice)
+                      : await draftRefundEmailAction(r.id, {
+                          choice,
+                          apology,
+                          extra: withExtra,
+                        });
                   setMsg(res?.error ?? null);
                   if (!res?.error) setChoosing(false);
                 })
               }
             >
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />} Write the draft
+              {pending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : choosing === "marked" ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                <Mail className="h-4 w-4" />
+              )}{" "}
+              {choosing === "marked" ? "Mark as emailed" : "Write the draft"}
             </button>
-            <button type="button" className="btn-ghost py-1.5 text-sm" disabled={pending} onClick={() => setChoosing(false)}>
+            <button
+              type="button"
+              className="btn-ghost py-1.5 text-sm"
+              disabled={pending}
+              onClick={() => setChoosing(false)}
+            >
               Cancel
             </button>
           </div>
         </div>
       )}
       {msg && <span className="text-xs text-bad-text">{msg}</span>}
-      {r.returnStatus && <span className="text-xs text-ink-2">{RETURN_LABEL[r.returnStatus] ?? r.returnStatus}</span>}
-      {editor && (r.returnStatus === "needed" || r.returnStatus === "instructions_sent") && (
-        <div className="flex flex-wrap gap-1 lg:justify-end">
-          {r.returnStatus === "needed" && (
-            <button type="button" className="btn-ghost py-1 text-xs" disabled={pending} onClick={() => start(() => setReturnStatusAction(r.id, "instructions_sent"))}>
-              <Check className="h-3.5 w-3.5" /> Instructions sent
-            </button>
-          )}
-          <button type="button" className="btn-ghost py-1 text-xs" disabled={pending} onClick={() => start(() => setReturnStatusAction(r.id, "received"))}>
-            <Check className="h-3.5 w-3.5" /> Items received
-          </button>
-        </div>
+      {r.returnStatus && (
+        <span className="text-xs text-ink-2">
+          {RETURN_LABEL[r.returnStatus] ?? r.returnStatus}
+        </span>
       )}
+      {editor &&
+        (r.returnStatus === "needed" ||
+          r.returnStatus === "instructions_sent") && (
+          <div className="flex flex-wrap gap-1 lg:justify-end">
+            {r.returnStatus === "needed" && (
+              <button
+                type="button"
+                className="btn-ghost py-1 text-xs"
+                disabled={pending}
+                onClick={() =>
+                  start(() => setReturnStatusAction(r.id, "instructions_sent"))
+                }
+              >
+                <Check className="h-3.5 w-3.5" /> Instructions sent
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn-ghost py-1 text-xs"
+              disabled={pending}
+              onClick={() =>
+                start(() => setReturnStatusAction(r.id, "received"))
+              }
+            >
+              <Check className="h-3.5 w-3.5" /> Items received
+            </button>
+          </div>
+        )}
     </div>
   );
 }
 
 /** The store's own last paragraph (apology, coupon, what's new). */
-export function ClosingForm({ storeId, storeName, closing, extra, itemsWord }: { storeId: string; storeName: string; closing: string; extra: string; itemsWord: string }) {
-  const [state, action] = useActionState(saveRefundClosingAction.bind(null, storeId), undefined);
+export function ClosingForm({
+  storeId,
+  storeName,
+  closing,
+  extra,
+  itemsWord,
+}: {
+  storeId: string;
+  storeName: string;
+  closing: string;
+  extra: string;
+  itemsWord: string;
+}) {
+  const [state, action] = useActionState(
+    saveRefundClosingAction.bind(null, storeId),
+    undefined,
+  );
   const [text, setText] = useState(closing);
   const [extraText, setExtraText] = useState(extra);
   const [word, setWord] = useState(itemsWord);
   return (
     <form action={action} className="card min-w-0 p-4">
-      <h2 className="text-sm font-semibold">{storeName}: refund email wording</h2>
-      <label className="label mt-3" htmlFor="rf-closing">Last paragraph (every email): what&apos;s new, a coupon code</label>
-      <textarea id="rf-closing" name="closing" className="input min-h-[90px] leading-relaxed" value={text} onChange={(e) => setText(e.target.value)} maxLength={600} />
-      <label className="label mt-3" htmlFor="rf-extra">Optional paragraph (ticked per email, e.g. the paperback explanation)</label>
-      <textarea id="rf-extra" name="extra" className="input min-h-[90px] leading-relaxed" value={extraText} onChange={(e) => setExtraText(e.target.value)} maxLength={600} />
-      <label className="label mt-3" htmlFor="rf-word">What you sell, in &quot;before sending any ___ back&quot;</label>
-      <input id="rf-word" name="itemsWord" className="input sm:w-48" value={word} onChange={(e) => setWord(e.target.value)} placeholder="items" maxLength={30} />
+      <h2 className="text-sm font-semibold">
+        {storeName}: refund email wording
+      </h2>
+      <label className="label mt-3" htmlFor="rf-closing">
+        Last paragraph (every email): what&apos;s new, a coupon code
+      </label>
+      <textarea
+        id="rf-closing"
+        name="closing"
+        className="input min-h-[90px] leading-relaxed"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        maxLength={600}
+      />
+      <label className="label mt-3" htmlFor="rf-extra">
+        Optional paragraph (ticked per email, e.g. the paperback explanation)
+      </label>
+      <textarea
+        id="rf-extra"
+        name="extra"
+        className="input min-h-[90px] leading-relaxed"
+        value={extraText}
+        onChange={(e) => setExtraText(e.target.value)}
+        maxLength={600}
+      />
+      <label className="label mt-3" htmlFor="rf-word">
+        What you sell, in &quot;before sending any ___ back&quot;
+      </label>
+      <input
+        id="rf-word"
+        name="itemsWord"
+        className="input sm:w-48"
+        value={word}
+        onChange={(e) => setWord(e.target.value)}
+        placeholder="items"
+        maxLength={30}
+      />
       <div className="mt-3 flex items-center gap-3">
         <SubmitButton className="btn-primary">Save</SubmitButton>
         <FormMessage state={state} />
